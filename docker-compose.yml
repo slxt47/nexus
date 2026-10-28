@@ -21,20 +21,21 @@ services:
       - nexus_net
 
   mail:
-    image: mailhog/mailhog:latest
+    image: axllent/mailpit:v1      # fängt alle Mails ab (Nachfolger von MailHog)
     container_name: nexus_mail
     restart: unless-stopped
     ports:
-      - "8025:8025"
+      - "127.0.0.1:8025:8025"
     networks:
       - nexus_net
 
   adminer:
     image: adminer:latest
     container_name: nexus_adminer
+    profiles: ["tools"]            # nur bei Bedarf: docker compose --profile tools up -d
     restart: unless-stopped
     ports:
-      - "3457:8080"
+      - "127.0.0.1:3457:8080"
     depends_on:
       - db
     networks:
@@ -68,7 +69,7 @@ services:
     volumes:
       - uploads_data:/uploads
     ports:
-      - "4000:4000"
+      - "127.0.0.1:4000:4000"
     networks:
       - nexus_net
 
@@ -82,7 +83,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "3456:80"
+      - "127.0.0.1:3456:80"   # nach außen über Reverse-Proxy/Tunnel mit HTTPS
     networks:
       - nexus_net
 

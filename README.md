@@ -10,7 +10,7 @@ Ein Twitter-artiges Netzwerk im CRT-Terminal-Look, komplett dockerisiert.
                     ↓
               ┌──────────┐   ┌──────────┐
               │   mail   │   │ adminer  │
-              │ MailHog  │   │ DB GUI   │
+              │ Mailpit  │   │ DB GUI   │
               └──────────┘   └──────────┘
 ```
 
@@ -18,11 +18,11 @@ Ein Twitter-artiges Netzwerk im CRT-Terminal-Look, komplett dockerisiert.
 
 | Service    | Image                   | Port  | Zweck                           |
 |------------|-------------------------|-------|---------------------------------|
-| `frontend` | nginx (build: lokal)    | 3000  | React SPA + Reverse-Proxy `/api`|
+| `frontend` | nginx (build: lokal)    | 3456  | React SPA + Reverse-Proxy `/api`|
 | `backend`  | node:20 (build: lokal)  | 4000  | Express REST API + SSE          |
 | `db`       | postgres:16-alpine      | —     | Persistenz                      |
-| `mail`     | mailhog/mailhog         | 8025  | Catcht alle Verifikations-Mails |
-| `adminer`  | adminer                 | 8080  | DB-Browser (optional)           |
+| `mail`     | axllent/mailpit         | 8025  | Fängt alle Verifikations-Mails ab |
+| `adminer`  | adminer (Profil `tools`)| 3457  | DB-Browser (optional)           |
 
 ## Schnellstart
 
@@ -45,16 +45,16 @@ docker compose logs -f backend
 
 | URL                       | Was                                          |
 |---------------------------|----------------------------------------------|
-| http://localhost:3000     | **NEXUS App** (das ist die UI)               |
-| http://localhost:8025     | **MailHog** — hier kommen die Email-Codes an |
-| http://localhost:8080     | **Adminer** — DB-GUI (Server: `db`, User/Pass aus `.env`) |
+| http://localhost:3456     | **NEXUS App** (das ist die UI)               |
+| http://localhost:8025     | **Mailpit** — hier kommen die Email-Codes an |
+| http://localhost:3457     | **Adminer** — DB-GUI, nur mit `docker compose --profile tools up -d` (Server: `db`, User/Pass aus `.env`) |
 | http://localhost:4000/api/health | Backend Healthcheck                   |
 
 ## Login-Flow
 
-1. App öffnen: http://localhost:3000
+1. App öffnen: http://localhost:3456
 2. Eigene Email eingeben → `[ TRANSMIT CODE ]`
-3. MailHog öffnen (http://localhost:8025) → 6-stelligen Code aus der Mail kopieren
+3. Mailpit öffnen (http://localhost:8025) → 6-stelligen Code aus der Mail kopieren
 4. Code in der App eingeben
 5. Beim ersten Login: Username, Display-Name und (optional) Avatar wählen → drin
 
@@ -63,12 +63,12 @@ docker compose logs -f backend
 Der Owner wird beim ersten Backend-Start **automatisch angelegt**. Default-Werte aus `.env`:
 
 ```
-[email protected]
+OWNER_EMAIL=owner@example.org
 OWNER_USERNAME=admin
 OWNER_DISPLAY_NAME=SYSTEM
 ```
 
-Um sich als Owner einzuloggen: Owner-Email eingeben → Code aus MailHog → fertig.
+Um sich als Owner einzuloggen: Owner-Email eingeben → Code aus Mailpit → fertig.
 Das Owner-Profil ist im UI schreibgeschützt (keine Änderungen an Name / Avatar / Bio möglich), und der Owner darf **jeden Post löschen** (Moderator-Privileg).
 
 ## Datenmodell
@@ -135,14 +135,14 @@ docker compose down -v
 | Backend startet, dann Crash-Loop   | `docker compose logs db` — DB ggf. noch nicht bereit; healthcheck wartet 30s |
 | "could not send email"             | `mail`-Container down: `docker compose up -d mail` |
 | Frontend zeigt 502 bei /api        | `backend` läuft nicht: `docker compose logs backend` |
-| Port 3000/4000/8025 schon belegt   | In `docker-compose.yml` Port-Mapping ändern        |
+| Port 3456/4000/8025 schon belegt   | In `docker-compose.yml` Port-Mapping ändern        |
 
 ## Owner-Defaults ändern
 
 In `.env`:
 
 ```env
-[email protected]
+OWNER_EMAIL=du@deine-domain.tld
 OWNER_USERNAME=root
 OWNER_DISPLAY_NAME=THE_ARCHITECT
 ```
@@ -152,3 +152,13 @@ Dann `docker compose down -v && docker compose up -d --build` (das `-v` löscht 
 ---
 
 `// nexus_terminal · multi-container build · v1.0`
+
+## Änderungen (Oktober 2026)
+
+- Fehler behoben: In `.env.example` fehlten die `SMTP_*`-Werte. Ohne sie konnte das Backend keine
+  Login-Codes verschicken, niemand konnte sich anmelden.
+- `[email protected]` (von Cloudflares E-Mail-Schutz verschluckt) durch echte Beispieladressen ersetzt.
+- MailHog (seit Jahren ohne Updates) durch **Mailpit** ersetzt, gleiche Ports.
+- Alle Ports nur auf `127.0.0.1`; **Adminer** startet nur noch mit `--profile tools`, weil er sonst
+  einen Datenbank-Login für alle im Netz anbietet.
+
