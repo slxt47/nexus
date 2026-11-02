@@ -1,100 +1,195 @@
+// Nexus – Oberfläche im Stil von dash.slxt.dev / slxt.org (Apple HIG). Logik und API unverändert.
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  User, Hash, Heart, Repeat2, MessageCircle, Send, Search,
-  Home, Mail, ArrowLeft, Trash2, TrendingUp, UserPlus, UserMinus, Loader2,
-  Check, AlertCircle, Image as ImageIcon, Settings, Power, Cpu, Wifi, Activity, X,
-  MessageSquare, Inbox, ZoomIn,
+  Home, Hash, MessageCircle, User, Settings, SquarePen, ChevronLeft, Heart, Repeat2, Trash2,
+  Image as ImageIcon, X, Check, Loader2, AlertCircle, BadgeCheck, LogOut, UserPlus, Search,
+  Send, Inbox, TrendingUp, Sparkles, MailCheck,
 } from 'lucide-react';
 import { api, auth, connectEvents, compressImage } from './api.js';
 
 const MAX_POST_LEN = 280;
 const MAX_DM_LEN = 1000;
-const BOOT_LINES = [
-  '> NEXUS TERMINAL v2.5',
-  '> Initializing socket layer...',
-  '> Loading user registry...',
-  '> Mounting feed buffer...',
-  '> Linking DM channel...',
-  '> Establishing secure channel...',
-  '> System ready.',
-];
+const ruhig = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-// ============================================================
-// HELPERS
-// ============================================================
+// ============================================================ Helfer
 const formatTime = (ts) => {
   const diff = Date.now() - new Date(ts).getTime();
-  if (diff < 60000) return 'just now';
+  if (diff < 60000) return 'now';
   if (diff < 3600000) return `${Math.floor(diff / 60000)}m`;
   if (diff < 86400000) return `${Math.floor(diff / 3600000)}h`;
   if (diff < 604800000) return `${Math.floor(diff / 86400000)}d`;
   return new Date(ts).toLocaleDateString();
 };
+// Farbe für Initialen-Avatare: kräftig genug für weißen Text (Kontrast)
 const hashColor = (str) => {
   let h = 0;
   for (let i = 0; i < (str || '').length; i++) h = str.charCodeAt(i) + ((h << 5) - h);
-  return `hsl(${Math.abs(h) % 360}, 70%, 50%)`;
+  return `hsl(${Math.abs(h) % 360}, 55%, 42%)`;
 };
 const extractHashtags = (text) => {
-  const m = text.match(/#[\w\u00C0-\u017F]+/g) || [];
+  const m = text.match(/#[\wÀ-ſ]+/g) || [];
   return [...new Set(m.map((t) => t.substring(1).toLowerCase()))];
 };
 
-// ============================================================
-// PRIMITIVES
-// ============================================================
-function Avatar({ user, size = 40, onClick }) {
-  const dim = `${size}px`;
-  if (!user) return <div style={{ width: dim, height: dim }} className="bg-zinc-900 border border-green-500/30" />;
-  if (user.isOwner) {
-    return (
-      <div onClick={onClick} style={{ width: dim, height: dim }}
-        className={`relative flex items-center justify-center bg-black border border-green-400 shrink-0 ${onClick ? 'cursor-pointer' : ''}`}>
-        <svg viewBox="0 0 24 24" width={size * 0.6} height={size * 0.6} fill="none" stroke="#4ade80" strokeWidth="2">
-          <rect x="2" y="3" width="20" height="14" />
-          <path d="M6 8l3 3-3 3M11 14h5" />
-        </svg>
-        <span className="absolute -top-1 -right-1 w-2 h-2 bg-green-400 animate-pulse" />
-      </div>
-    );
+// ============================================================ Himmel (wie slxt.org)
+function Himmel() {
+  const ref = useRef(null);
+  useEffect(() => {
+    const box = ref.current, cv = box.querySelector('canvas'), ctx = cv.getContext('2d'), schnuppen = box.lastChild;
+    const sterne = () => {
+      const dpr = Math.min(2, window.devicePixelRatio || 1), w = window.innerWidth, h = window.innerHeight;
+      cv.width = w * dpr; cv.height = h * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
+      for (let i = 0, n = Math.round(w * h / 5200); i < n; i++) {
+        ctx.globalAlpha = 0.25 + Math.random() * 0.65;
+        ctx.fillStyle = Math.random() < 0.15 ? '#cdd8ff' : '#ffffff';
+        ctx.beginPath(); ctx.arc(Math.random() * w, Math.random() * h * 0.92, Math.random() < 0.08 ? 1.3 : Math.random() * 0.8 + 0.3, 0, Math.PI * 2); ctx.fill();
+      }
+    };
+    sterne();
+    let rt; const groesse = () => { clearTimeout(rt); rt = setTimeout(sterne, 200); };
+    window.addEventListener('resize', groesse);
+    const meteor = () => {
+      if (ruhig() || document.hidden) return;
+      const W = window.innerWidth, H = window.innerHeight, len = 80 + Math.random() * 150, dir = Math.random() < 0.5 ? 1 : -1;
+      const ang = (14 + Math.random() * 26) * Math.PI / 180, dist = Math.max(W, H) * (0.22 + Math.random() * 0.25);
+      const x0 = dir > 0 ? Math.random() * W * 0.65 : W * 0.35 + Math.random() * W * 0.65, y0 = Math.random() * H * 0.42;
+      const x1 = x0 + dir * Math.cos(ang) * dist, y1 = y0 + Math.sin(ang) * dist, deg = Math.atan2(y1 - y0, x1 - x0) * 180 / Math.PI;
+      const el = document.createElement('i'); el.className = 'meteor'; el.style.width = `${len}px`; el.style.opacity = '0'; schnuppen.append(el);
+      const at = (x, y, s) => `translate(${x - len}px, ${y - 1}px) rotate(${deg}deg) scaleX(${s})`;
+      const a = el.animate([{ transform: at(x0, y0, 0.3), opacity: 0 }, { opacity: 1, offset: 0.12 }, { opacity: 0.9, offset: 0.65 }, { transform: at(x1, y1, 1), opacity: 0 }],
+        { duration: 650 + Math.random() * 700, easing: 'cubic-bezier(.3, .55, .55, 1)' });
+      a.onfinish = a.oncancel = () => el.remove();
+    };
+    let t;
+    const plan = (erst) => { t = setTimeout(() => { meteor(); plan(false); }, erst ? 2500 + Math.random() * 3000 : 6000 + Math.random() * 10000); };
+    plan(true);
+    return () => { window.removeEventListener('resize', groesse); clearTimeout(t); clearTimeout(rt); };
+  }, []);
+  return <div ref={ref} className="himmel" aria-hidden="true"><canvas /><div className="sternschnuppen" /></div>;
+}
+
+// ============================================================ Grundbausteine
+function Avatar({ user, size = 40, onClick, label }) {
+  const stil = { width: size, height: size, fontSize: Math.round(size * 0.42) };
+  let innen;
+  let klasse = 'avatar';
+  if (!user) innen = null;
+  else if (user.isOwner) { klasse += ' besitzer'; innen = <img src="/logo.svg" alt="" />; }
+  else if (user.avatar) innen = <img src={user.avatar} alt="" />;
+  else { stil.background = hashColor(user.id || user.username); innen = (user.displayName || user.username || '?').charAt(0).toUpperCase(); }
+  if (onClick) {
+    return <button type="button" className={klasse} style={stil} onClick={onClick} aria-label={label || `Profile of ${user?.displayName || ''}`}>{innen}</button>;
   }
-  if (user.avatar) {
-    return <img onClick={onClick} src={user.avatar} alt={user.username}
-      style={{ width: dim, height: dim }}
-      className={`object-cover border border-green-500/40 shrink-0 ${onClick ? 'cursor-pointer' : ''}`} />;
-  }
-  const initial = (user.displayName || user.username || '?').charAt(0).toUpperCase();
-  return (
-    <div onClick={onClick}
-      style={{ width: dim, height: dim, background: hashColor(user.id || user.username), fontSize: size * 0.45 }}
-      className={`flex items-center justify-center font-bold text-black border border-green-500/40 shrink-0 ${onClick ? 'cursor-pointer' : ''}`}>
-      {initial}
-    </div>
-  );
+  return <span className={klasse} style={stil} aria-hidden="true">{innen}</span>;
+}
+
+function Abzeichen({ user }) {
+  if (!user?.isOwner) return null;
+  return <span className="abzeichen" title="Admin" aria-label="Admin"><BadgeCheck aria-hidden="true" /></span>;
 }
 
 function PostContent({ content, onHashtag }) {
   if (!content) return null;
-  const parts = content.split(/(#[\w\u00C0-\u017F]+|@[\w]+|https?:\/\/\S+)/g);
+  const parts = content.split(/(#[\wÀ-ſ]+|@[\w]+|https?:\/\/\S+)/g);
   return (
-    <div className="whitespace-pre-wrap break-words leading-relaxed">
+    <>
       {parts.map((p, i) => {
         if (!p) return null;
         if (p.startsWith('#')) {
-          return <span key={i} onClick={(e) => { e.stopPropagation(); onHashtag && onHashtag(p.substring(1).toLowerCase()); }}
-            className="text-cyan-400 hover:text-cyan-300 hover:underline cursor-pointer">{p}</span>;
+          return <button key={i} type="button" className="tag" onClick={(e) => { e.stopPropagation(); onHashtag && onHashtag(p.substring(1).toLowerCase()); }}>{p}</button>;
         }
-        if (p.startsWith('@')) return <span key={i} className="text-cyan-400">{p}</span>;
-        if (p.startsWith('http')) return <a key={i} href={p} target="_blank" rel="noreferrer" className="text-cyan-400 underline break-all">{p}</a>;
+        if (p.startsWith('@')) return <span key={i} className="erwaehnung">{p}</span>;
+        if (p.startsWith('http')) return <a key={i} href={p} target="_blank" rel="noopener noreferrer" className="link" onClick={(e) => e.stopPropagation()}>{p}</a>;
         return <span key={i}>{p}</span>;
       })}
+    </>
+  );
+}
+
+function Laedt({ text = 'Loading…' }) {
+  return <div className="laedt" role="status"><Loader2 size={20} className="dreht" aria-hidden="true" />{text}</div>;
+}
+
+function Leer({ icon: Icon = Sparkles, titel, text, children }) {
+  return (
+    <div className="leer">
+      <Icon aria-hidden="true" />
+      <strong>{titel}</strong>
+      {text && <span>{text}</span>}
+      {children}
     </div>
   );
 }
 
-// ============================================================
-// LIGHTBOX
-// ============================================================
+// Kopfleiste einer Ansicht: Zurück (mit Text), Titel, Aktionen rechts
+function Kopf({ titel, unter, onBack, backLabel = 'Back', children, marke }) {
+  return (
+    <header className="kopf">
+      {onBack && (
+        <button type="button" className="zurueck" onClick={onBack} aria-label={backLabel}>
+          <ChevronLeft aria-hidden="true" /><span className="nur-breit">{backLabel}</span>
+        </button>
+      )}
+      {marke && !onBack && <img src="/logo.svg" alt="" width="32" height="32" className="mobil-marke" style={{ borderRadius: 9 }} />}
+      <div className="titel">
+        <h1>{titel}</h1>
+        {unter && <div className="unter">{unter}</div>}
+      </div>
+      {children}
+    </header>
+  );
+}
+
+// Segment-Steuerung (gleich breite Segmente, gleitender Daumen)
+function Segmente({ werte, wert, onChange, label }) {
+  const i = Math.max(0, werte.findIndex(([w]) => w === wert));
+  return (
+    <div className="segmente" role="tablist" aria-label={label}>
+      <span className="daumen" aria-hidden="true" style={{ width: `calc((100% - 6px) / ${werte.length})`, transform: `translateX(${i * 100}%)` }} />
+      {werte.map(([w, text]) => (
+        <button key={w} type="button" role="tab" aria-selected={w === wert} onClick={() => onChange(w)}>{text}</button>
+      ))}
+    </div>
+  );
+}
+
+// Überlagerung (kein <dialog>: Safari/WebKit lässt Animationen im Top-Layer hängen)
+function Ueberlagerung({ titel, onClose, children, rechts }) {
+  const ref = useRef(null);
+  const schliessen = useRef(onClose);
+  schliessen.current = onClose;   // aktuelle Funktion merken, ohne den Effekt neu zu starten (Fokus bleibt beim Live-Update)
+  useEffect(() => {
+    const vorher = document.activeElement;
+    const taste = (e) => {
+      if (e.key === 'Escape') schliessen.current();
+      if (e.key === 'Tab' && ref.current) {
+        const f = [...ref.current.querySelectorAll('button, input, textarea, [href]')].filter((x) => !x.disabled && x.offsetParent);
+        if (!f.length) return;
+        const i = f.indexOf(document.activeElement);
+        if (e.shiftKey && i <= 0) { e.preventDefault(); f[f.length - 1].focus(); }
+        else if (!e.shiftKey && i === f.length - 1) { e.preventDefault(); f[0].focus(); }
+      }
+    };
+    window.addEventListener('keydown', taste);
+    document.documentElement.style.overflow = 'hidden';
+    setTimeout(() => ref.current?.querySelector('textarea, input')?.focus(), 30);
+    return () => { window.removeEventListener('keydown', taste); document.documentElement.style.overflow = ''; vorher?.focus?.(); };
+  }, []);
+  return (
+    <div className="ueberlagerung">
+      <div className="hintergrund" onClick={onClose} aria-hidden="true" />
+      <div className="blatt" role="dialog" aria-modal="true" aria-label={titel} ref={ref}>
+        <div className="blatt-kopf">
+          <div className="platz"><button type="button" className="knopf ohne klein" onClick={onClose}>Cancel</button></div>
+          <h2>{titel}</h2>
+          <div className="platz" style={{ textAlign: 'right' }}>{rechts}</div>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function Lightbox({ src, onClose }) {
   useEffect(() => {
     const handle = (e) => { if (e.key === 'Escape') onClose(); };
@@ -102,45 +197,14 @@ function Lightbox({ src, onClose }) {
     return () => window.removeEventListener('keydown', handle);
   }, [onClose]);
   return (
-    <div className="fixed inset-0 z-[60] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 cursor-zoom-out" onClick={onClose}>
-      <button onClick={onClose} className="absolute top-4 right-4 text-green-400/70 hover:text-green-300 p-2 border border-green-500/30">
-        <X size={20} />
-      </button>
-      <img src={src} className="max-w-full max-h-full object-contain border border-green-500/30" onClick={(e) => e.stopPropagation()} />
+    <div className="lightbox" onClick={onClose} role="dialog" aria-modal="true" aria-label="Image">
+      <button type="button" className="knopf rund" onClick={onClose} aria-label="Close" autoFocus><X aria-hidden="true" /></button>
+      <img src={src} alt="" onClick={(e) => e.stopPropagation()} />
     </div>
   );
 }
 
-// ============================================================
-// BOOT
-// ============================================================
-function BootScreen({ onDone }) {
-  const [lines, setLines] = useState([]);
-  useEffect(() => {
-    let i = 0;
-    const interval = setInterval(() => {
-      setLines((prev) => [...prev, BOOT_LINES[i]]);
-      i++;
-      if (i >= BOOT_LINES.length) { clearInterval(interval); setTimeout(onDone, 400); }
-    }, 140);
-    return () => clearInterval(interval);
-  }, [onDone]);
-  return (
-    <div className="fixed inset-0 bg-black flex items-center justify-center p-6 font-mono z-50">
-      <div className="w-full max-w-xl text-green-400 text-sm">
-        <div className="text-xs text-green-500/50 mb-4 border-b border-green-500/20 pb-2">
-          ┌─[ N E X U S ]─────────────────────────────┐
-        </div>
-        {lines.map((l, i) => <div key={i} className="leading-relaxed glow">{l}</div>)}
-        <span className="inline-block w-2 h-4 bg-green-400 animate-pulse ml-0 mt-1" />
-      </div>
-    </div>
-  );
-}
-
-// ============================================================
-// AUTH SCREEN
-// ============================================================
+// ============================================================ Anmeldung
 function AuthScreen({ onAuthenticated }) {
   const [step, setStep] = useState('email');
   const [email, setEmail] = useState('');
@@ -159,7 +223,7 @@ function AuthScreen({ onAuthenticated }) {
       await api.requestCode(email.trim().toLowerCase());
       setEmail(email.trim().toLowerCase());
       setStep('code');
-    } catch (err) { setError(err.message || 'failed'); }
+    } catch (err) { setError(err.message || 'Could not send the code.'); }
     setBusy(false);
   };
   const submitCode = async (e) => {
@@ -172,142 +236,101 @@ function AuthScreen({ onAuthenticated }) {
         setNewUsername(sug); setNewDisplay(sug);
         setStep('profile');
       } else { auth.setToken(res.token); onAuthenticated(res.user); }
-    } catch (err) { setError(err.message || 'verification failed'); }
+    } catch (err) { setError(err.message || 'That code didn’t work.'); }
     setBusy(false);
   };
   const handleAvatar = async (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    if (!f.type.startsWith('image/')) { setError('image only'); return; }
+    if (!f.type.startsWith('image/')) { setError('Please choose an image.'); return; }
     try { setNewAvatar(await compressImage(f, 200, 0.75)); }
-    catch { setError('could not process image'); }
+    catch { setError('Could not process the image.'); }
   };
   const submitProfile = async (e) => {
     e.preventDefault(); setError(''); setBusy(true);
     try {
       const res = await api.register(regToken, newUsername, newDisplay, newAvatar);
       auth.setToken(res.token); onAuthenticated(res.user);
-    } catch (err) { setError(err.message || 'registration failed'); }
+    } catch (err) { setError(err.message || 'Could not create your profile.'); }
     setBusy(false);
   };
 
+  const schritt = { email: 0, code: 1, profile: 2 }[step];
+  const Fehler = () => error ? <div className="fehler" role="alert"><AlertCircle size={16} aria-hidden="true" />{error}</div> : null;
+
   return (
-    <div className="min-h-screen bg-black flex items-center justify-center p-4 font-mono">
-      <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <div className="text-green-400 text-3xl font-bold tracking-widest glow">N E X U S</div>
-          <div className="text-green-500/50 text-xs mt-1 tracking-wider">// secure terminal access //</div>
-        </div>
-        <div className="border border-green-500/40 bg-zinc-950/50">
-          <div className="border-b border-green-500/30 px-4 py-2 flex items-center justify-between bg-green-500/5">
-            <div className="flex gap-1.5">
-              <div className="w-2.5 h-2.5 bg-red-500/70" />
-              <div className="w-2.5 h-2.5 bg-yellow-500/70" />
-              <div className="w-2.5 h-2.5 bg-green-500" />
+    <main className="anmeldung">
+      <div className="karte">
+        <img className="logo" src="/logo.svg" alt="" width="72" height="72" />
+        <h1>nexus<span className="punkt">.</span></h1>
+        <p className="unterzeile">
+          {step === 'email' && 'Sign in or create an account with your email.'}
+          {step === 'code' && <>We sent a 6-digit code to <strong>{email}</strong>.</>}
+          {step === 'profile' && 'Almost there – choose how others see you.'}
+        </p>
+        <div className="schritte" aria-hidden="true">{[0, 1, 2].map((i) => <i key={i} className={i === schritt ? 'an' : ''} />)}</div>
+
+        {step === 'email' && (
+          <form onSubmit={submitEmail}>
+            <label className="feld"><span>Email</span>
+              <input className="eingabe" type="email" autoFocus required value={email} onChange={(e) => setEmail(e.target.value)}
+                placeholder="name@example.com" autoComplete="email" inputMode="email" autoCapitalize="none" spellCheck="false" />
+            </label>
+            <button type="submit" disabled={busy || !email.trim()} className="knopf primaer gross">
+              {busy ? <Loader2 size={18} className="dreht" aria-hidden="true" /> : null}{busy ? 'Sending…' : 'Continue'}
+            </button>
+            <Fehler />
+          </form>
+        )}
+        {step === 'code' && (
+          <form onSubmit={submitCode}>
+            <label className="feld"><span>Verification Code</span>
+              <input className="eingabe code" autoFocus required maxLength={6} value={code} inputMode="numeric" autoComplete="one-time-code"
+                pattern="[0-9]{6}" aria-describedby="code-hilfe" onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} placeholder="000000" />
+              <small id="code-hilfe">Check your inbox – the code is valid for a few minutes.</small>
+            </label>
+            <button type="submit" disabled={busy || code.length !== 6} className="knopf primaer gross">
+              {busy ? <Loader2 size={18} className="dreht" aria-hidden="true" /> : null}{busy ? 'Checking…' : 'Verify'}
+            </button>
+            <button type="button" className="knopf ohne" onClick={() => { setStep('email'); setCode(''); setError(''); }}>Use a Different Email</button>
+            <Fehler />
+          </form>
+        )}
+        {step === 'profile' && (
+          <form onSubmit={submitProfile}>
+            <div className="avatar-wahl">
+              <Avatar user={{ username: newUsername || '?', displayName: newDisplay, avatar: newAvatar }} size={72} />
+              <div style={{ display: 'grid', gap: 4 }}>
+                <button type="button" className="knopf klein" onClick={() => fileRef.current?.click()}><ImageIcon size={16} aria-hidden="true" />Choose Photo</button>
+                <small className="leise">Optional – you can change it later.</small>
+              </div>
+              <input ref={fileRef} type="file" accept="image/*" onChange={handleAvatar} hidden />
             </div>
-            <div className="text-green-400/70 text-xs">
-              {step === 'email' && 'auth.sh — login'}
-              {step === 'code' && 'auth.sh — verify'}
-              {step === 'profile' && 'auth.sh — register'}
-            </div>
-            <div className="w-12" />
-          </div>
-          <div className="p-6 text-green-400 text-sm">
-            {step === 'email' && (
-              <form onSubmit={submitEmail} className="space-y-4">
-                <div>
-                  <div className="text-green-500/70 mb-1">$ enter your email_address:</div>
-                  <div className="flex items-center gap-2 border border-green-500/40 px-3 py-2 focus-within:border-green-400 bg-black/60">
-                    <Mail size={16} className="text-green-500/60" />
-                    <input type="email" autoFocus value={email} onChange={(e) => setEmail(e.target.value)}
-                      placeholder="[email protected]"
-                      className="bg-transparent outline-none flex-1 text-green-300 placeholder:text-green-500/30" />
-                  </div>
-                </div>
-                <div className="text-xs text-green-500/50 leading-relaxed">
-                  &gt; Code wird via SMTP versendet. 
-                </div>
-                <button type="submit" disabled={busy} className="w-full border border-green-400 text-green-300 hover:bg-green-400 hover:text-black py-2 font-bold tracking-wider transition-colors disabled:opacity-50">
-                  {busy ? <Loader2 className="animate-spin mx-auto" size={18} /> : '[ TRANSMIT CODE ]'}
-                </button>
-                {error && <div className="text-red-400 text-xs flex items-center gap-1"><AlertCircle size={12} />{error}</div>}
-              </form>
-            )}
-            {step === 'code' && (
-              <form onSubmit={submitCode} className="space-y-4">
-                <div className="border border-cyan-500/40 bg-cyan-500/5 p-3 text-xs">
-                  <div className="text-cyan-300 mb-1">[ CODE TRANSMITTED ]</div>
-                  <div className="text-cyan-400/70">to: {email}</div>
-                </div>
-                <div>
-                  <div className="text-green-500/70 mb-1">$ enter verification code:</div>
-                  <input autoFocus maxLength={6} value={code}
-                    onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-                    placeholder="------"
-                    className="w-full bg-black/60 border border-green-500/40 focus:border-green-400 outline-none px-3 py-2 text-green-300 text-center text-xl tracking-[0.5em] font-bold" />
-                </div>
-                <button type="submit" disabled={busy} className="w-full border border-green-400 text-green-300 hover:bg-green-400 hover:text-black py-2 font-bold tracking-wider transition-colors disabled:opacity-50">
-                  {busy ? <Loader2 className="animate-spin mx-auto" size={18} /> : '[ VERIFY ]'}
-                </button>
-                <button type="button" onClick={() => { setStep('email'); setCode(''); setError(''); }} className="w-full text-green-500/60 hover:text-green-400 text-xs">
-                  &lt; back
-                </button>
-                {error && <div className="text-red-400 text-xs flex items-center gap-1"><AlertCircle size={12} />{error}</div>}
-              </form>
-            )}
-            {step === 'profile' && (
-              <form onSubmit={submitProfile} className="space-y-4">
-                <div className="text-green-500/70">$ initialize new_user profile:</div>
-                <div className="flex items-center gap-4">
-                  <div className="relative">
-                    {newAvatar ? (
-                      <img src={newAvatar} className="w-16 h-16 object-cover border border-green-400" />
-                    ) : (
-                      <div className="w-16 h-16 border border-dashed border-green-500/40 flex items-center justify-center text-green-500/40">
-                        <ImageIcon size={24} />
-                      </div>
-                    )}
-                    <button type="button" onClick={() => fileRef.current?.click()} className="absolute -bottom-1 -right-1 bg-green-400 text-black p-1 hover:bg-green-300">
-                      <ImageIcon size={10} />
-                    </button>
-                    <input ref={fileRef} type="file" accept="image/*" onChange={handleAvatar} className="hidden" />
-                  </div>
-                  <div className="flex-1 text-xs text-green-500/60">
-                    &gt; upload avatar<br />&gt; or skip (auto-generate)
-                  </div>
-                </div>
-                <div>
-                  <div className="text-green-500/70 mb-1 text-xs">username:</div>
-                  <div className="flex items-center border border-green-500/40 focus-within:border-green-400 bg-black/60">
-                    <span className="px-2 text-green-500/60">@</span>
-                    <input value={newUsername} onChange={(e) => setNewUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-                      maxLength={20} className="bg-transparent outline-none flex-1 py-2 text-green-300" />
-                  </div>
-                </div>
-                <div>
-                  <div className="text-green-500/70 mb-1 text-xs">display name:</div>
-                  <input value={newDisplay} onChange={(e) => setNewDisplay(e.target.value)} maxLength={30}
-                    className="w-full bg-black/60 border border-green-500/40 focus:border-green-400 outline-none px-3 py-2 text-green-300" />
-                </div>
-                <button type="submit" disabled={busy} className="w-full border border-green-400 text-green-300 hover:bg-green-400 hover:text-black py-2 font-bold tracking-wider transition-colors disabled:opacity-50">
-                  {busy ? <Loader2 className="animate-spin mx-auto" size={18} /> : '[ ENTER NEXUS ]'}
-                </button>
-                {error && <div className="text-red-400 text-xs flex items-center gap-1"><AlertCircle size={12} />{error}</div>}
-              </form>
-            )}
-          </div>
-        </div>
+            <label className="feld"><span>Username</span>
+              <div className="mit-vorsatz"><span aria-hidden="true">@</span>
+                <input className="eingabe" value={newUsername} maxLength={20} autoCapitalize="none" spellCheck="false" required
+                  onChange={(e) => setNewUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))} />
+              </div>
+              <small>Letters, numbers and _ – can’t be changed later.</small>
+            </label>
+            <label className="feld"><span>Display Name</span>
+              <input className="eingabe" value={newDisplay} onChange={(e) => setNewDisplay(e.target.value)} maxLength={30} required />
+            </label>
+            <button type="submit" disabled={busy} className="knopf primaer gross">
+              {busy ? <Loader2 size={18} className="dreht" aria-hidden="true" /> : null}{busy ? 'Creating…' : 'Join Nexus'}
+            </button>
+            <Fehler />
+          </form>
+        )}
       </div>
-    </div>
+    </main>
   );
 }
 
-// ============================================================
-// COMPOSER WITH IMAGE ATTACHMENT
-// ============================================================
-function Composer({ user, onSubmit, replyTo = null, compact = false, placeholder = null }) {
+// ============================================================ Verfassen
+function Composer({ user, onSubmit, replyTo = null, placeholder = null, autoFocus = false }) {
   const [content, setContent] = useState('');
-  const [image, setImage] = useState(null); // data URL preview
+  const [image, setImage] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -316,230 +339,219 @@ function Composer({ user, onSubmit, replyTo = null, compact = false, placeholder
   const pickImage = async (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    if (!f.type.startsWith('image/')) { setError('image only'); return; }
-    if (f.size > 15 * 1024 * 1024) { setError('file too large (>15MB raw)'); return; }
+    if (!f.type.startsWith('image/')) { setError('Please choose an image.'); return; }
+    if (f.size > 15 * 1024 * 1024) { setError('That image is too large (max. 15 MB).'); return; }
     setError(''); setUploading(true);
-    try {
-      const compressed = await compressImage(f, 1200, 0.82);
-      setImage(compressed);
-    } catch { setError('could not process image'); }
+    try { setImage(await compressImage(f, 1200, 0.82)); }
+    catch { setError('Could not process the image.'); }
     setUploading(false);
     if (fileRef.current) fileRef.current.value = '';
   };
 
   const submit = async () => {
     const t = content.trim();
-    if (!t && !image) return;
-    if (busy) return;
+    if ((!t && !image) || busy) return;
     setBusy(true); setError('');
     try {
       let imageUrl = null;
-      if (image) {
-        const up = await api.upload(image);
-        imageUrl = up.url;
-      }
+      if (image) imageUrl = (await api.upload(image)).url;
       await onSubmit({ content: t, imageUrl });
       setContent(''); setImage(null);
-    } catch (e) {
-      setError(e.message || 'failed');
-    }
+    } catch (e) { setError(e.message || 'Could not post.'); }
     setBusy(false);
   };
 
   const remaining = MAX_POST_LEN - content.length;
   const over = remaining < 0;
   const canSubmit = (content.trim() || image) && !over && !busy && !uploading;
+  const anteil = Math.min(1, content.length / MAX_POST_LEN), umfang = 2 * Math.PI * 10;
 
   return (
-    <div className={`flex gap-3 ${compact ? 'p-3' : 'p-4'} border-b border-green-500/20`}>
-      <Avatar user={user} size={compact ? 36 : 44} />
-      <div className="flex-1 min-w-0">
-        <textarea value={content} onChange={(e) => setContent(e.target.value)}
+    <div className="verfassen">
+      <Avatar user={user} size={44} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <textarea value={content} onChange={(e) => setContent(e.target.value)} autoFocus={autoFocus}
           onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submit(); }}
-          placeholder={placeholder || (replyTo ? `> reply to @${replyTo.username}...` : "> what's on your mind?_")}
-          rows={compact ? 2 : 3}
-          className="w-full bg-transparent outline-none resize-none text-green-300 placeholder:text-green-500/30 text-[15px] leading-relaxed" />
-
+          aria-label={replyTo ? `Reply to @${replyTo.username}` : 'New post'}
+          placeholder={placeholder || (replyTo ? `Reply to @${replyTo.username}` : 'What’s happening?')} rows={2} />
         {image && (
-          <div className="relative inline-block mt-2 border border-green-500/30">
-            <img src={image} className="max-h-48 object-contain" />
-            <button onClick={() => setImage(null)} className="absolute top-1 right-1 bg-black/80 border border-green-500/40 hover:border-red-400 hover:text-red-400 text-green-300 p-1">
-              <X size={12} />
-            </button>
+          <div className="anhang">
+            <img src={image} alt="Attached image" />
+            <button type="button" className="knopf rund klein" onClick={() => setImage(null)} aria-label="Remove image"><X size={16} aria-hidden="true" /></button>
           </div>
         )}
-
-        <div className="flex items-center justify-between mt-2 pt-2 border-t border-green-500/10">
-          <div className="flex items-center gap-3">
-            <button onClick={() => fileRef.current?.click()} disabled={uploading}
-              className="text-green-500/70 hover:text-green-300 transition-colors disabled:opacity-30" title="attach image">
-              {uploading ? <Loader2 size={16} className="animate-spin" /> : <ImageIcon size={16} />}
-            </button>
-            <input ref={fileRef} type="file" accept="image/*" onChange={pickImage} className="hidden" />
-            {extractHashtags(content).length > 0 && (
-              <span className="text-xs text-cyan-400/60">#{extractHashtags(content).length}</span>
+        <div className="werkzeuge">
+          <button type="button" className="knopf rund ohne" onClick={() => fileRef.current?.click()} disabled={uploading} aria-label="Add image" title="Add image">
+            {uploading ? <Loader2 size={20} className="dreht" aria-hidden="true" /> : <ImageIcon size={20} aria-hidden="true" style={{ color: 'var(--akzent)' }} />}
+          </button>
+          <input ref={fileRef} type="file" accept="image/*" onChange={pickImage} hidden />
+          {extractHashtags(content).length > 0 && <span className="leise" style={{ fontSize: 'var(--t-mini)' }}>{extractHashtags(content).length} #</span>}
+          <div className="rechts-teil">
+            {content.length > 0 && (
+              <>
+                {remaining <= 20 && <span className={`rest ${over ? 'ueber' : ''}`} aria-live="polite">{remaining}</span>}
+                <svg className={`ring ${over ? 'ueber' : remaining <= 20 ? 'knapp' : ''}`} viewBox="0 0 26 26" aria-hidden="true">
+                  <circle className="bahn" cx="13" cy="13" r="10" fill="none" strokeWidth="2.5" />
+                  <circle className="wert" cx="13" cy="13" r="10" fill="none" strokeWidth="2.5" strokeLinecap="round"
+                    strokeDasharray={umfang} strokeDashoffset={umfang * (1 - anteil)} />
+                </svg>
+              </>
             )}
-          </div>
-          <div className="flex items-center gap-3">
-            <span className={`text-xs font-mono ${over ? 'text-red-400' : remaining < 20 ? 'text-yellow-400' : 'text-green-500/50'}`}>{remaining}</span>
-            <button onClick={submit} disabled={!canSubmit}
-              className="border border-green-400 text-green-300 hover:bg-green-400 hover:text-black px-3 py-1 text-xs font-bold tracking-wider transition-colors disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5">
-              {busy ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
-              {replyTo ? 'REPLY' : 'POST'}
+            <button type="button" onClick={submit} disabled={!canSubmit} className="knopf primaer klein">
+              {busy ? <Loader2 size={16} className="dreht" aria-hidden="true" /> : null}{replyTo ? 'Reply' : 'Post'}
             </button>
           </div>
         </div>
-        {error && <div className="text-red-400 text-xs mt-1">{error}</div>}
+        {error && <div className="fehler" role="alert"><AlertCircle size={16} aria-hidden="true" />{error}</div>}
       </div>
     </div>
   );
 }
 
-// ============================================================
-// POST CARD
-// ============================================================
-function PostCard({ post, currentUser, onAction, onNavigate, onHashtag, onLightbox }) {
+// ============================================================ Beitrag
+function PostCard({ post, currentUser, onAction, onNavigate, onHashtag, onLightbox, hervor = false }) {
+  const [pop, setPop] = useState('');
   if (!post || !post.author) return null;
-  if (post.repostOf && !post.content && !post.imageUrl) return null; // skip orphan repost markers
+  if (post.repostOf && !post.content && !post.imageUrl) return null;
 
   const liked = post.viewer?.liked;
   const reposted = post.viewer?.reposted;
   const canDelete = currentUser.id === post.authorId || currentUser.isOwner;
+  const tun = (aktion) => (e) => {
+    e.stopPropagation();
+    if (!ruhig() && aktion !== 'delete') { setPop(aktion); setTimeout(() => setPop(''), 500); }
+    onAction(aktion, post.id);
+  };
+  const oeffnen = () => { if (!hervor) onNavigate('post', post.id); };
 
   return (
-    <div className="border-b border-green-500/20 hover:bg-green-500/[0.02] transition-colors">
-      <div className="p-4 cursor-pointer" onClick={() => onNavigate('post', post.id)}>
-        <div className="flex gap-3">
-          <Avatar user={post.author} size={44}
-            onClick={(e) => { e.stopPropagation(); onNavigate('profile', post.authorId); }} />
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 text-sm flex-wrap">
-              <span className="font-bold text-green-300 hover:underline"
-                onClick={(e) => { e.stopPropagation(); onNavigate('profile', post.authorId); }}>
-                {post.author.displayName}
-              </span>
-              {post.author.isOwner && <span className="text-[9px] bg-green-400 text-black px-1 font-bold tracking-wider">ROOT</span>}
-              <span className="text-green-500/50">@{post.author.username}</span>
-              <span className="text-green-500/40">·</span>
-              <span className="text-green-500/50 text-xs">{formatTime(post.createdAt)}</span>
-              {canDelete && (
-                <button onClick={(e) => { e.stopPropagation(); onAction('delete', post.id); }}
-                  className="ml-auto text-green-500/40 hover:text-red-400 p-1" title="delete">
-                  <Trash2 size={12} />
-                </button>
-              )}
-            </div>
-
-            {post.replyTo && <div className="text-xs text-green-500/50 mb-1">replying to thread</div>}
-
-            <div className="text-green-100/90 text-[15px] mt-1">
-              <PostContent content={post.content} onHashtag={onHashtag} />
-            </div>
-
-            {post.imageUrl && (
-              <div className="mt-3 border border-green-500/20 relative inline-block max-w-full"
-                onClick={(e) => { e.stopPropagation(); onLightbox(post.imageUrl); }}>
-                <img src={post.imageUrl} className="max-h-96 max-w-full object-contain cursor-zoom-in" />
-                <div className="absolute top-2 right-2 bg-black/60 text-green-400 p-1 border border-green-500/30 opacity-0 hover:opacity-100 transition-opacity pointer-events-none">
-                  <ZoomIn size={12} />
-                </div>
-              </div>
-            )}
-
-            <div className="flex items-center gap-6 mt-3 text-green-500/60 text-xs">
-              <button onClick={(e) => { e.stopPropagation(); onNavigate('post', post.id); }}
-                className="flex items-center gap-1.5 hover:text-cyan-400 transition-colors group">
-                <MessageCircle size={14} className="group-hover:scale-110 transition-transform" />
-                <span>{post.counts?.replies || 0}</span>
-              </button>
-              <button onClick={(e) => { e.stopPropagation(); onAction('repost', post.id); }}
-                className={`flex items-center gap-1.5 hover:text-green-300 transition-colors group ${reposted ? 'text-green-300' : ''}`}>
-                <Repeat2 size={14} className="group-hover:scale-110 transition-transform" />
-                <span>{post.counts?.reposts || 0}</span>
-              </button>
-              <button onClick={(e) => { e.stopPropagation(); onAction('like', post.id); }}
-                className={`flex items-center gap-1.5 hover:text-pink-400 transition-colors group ${liked ? 'text-pink-400' : ''}`}>
-                <Heart size={14} fill={liked ? 'currentColor' : 'none'} className="group-hover:scale-110 transition-transform" />
-                <span>{post.counts?.likes || 0}</span>
-              </button>
-            </div>
-          </div>
+    <article className={`karte post${hervor ? ' hervor' : ''}`} onClick={oeffnen} aria-label={`Post by ${post.author.displayName}`}>
+      <Avatar user={post.author} size={hervor ? 52 : 44} onClick={(e) => { e.stopPropagation(); onNavigate('profile', post.authorId); }} />
+      <div className="rumpf">
+        <div className="zeile">
+          <button type="button" className="name" onClick={(e) => { e.stopPropagation(); onNavigate('profile', post.authorId); }}>{post.author.displayName}</button>
+          <Abzeichen user={post.author} />
+          <span className="handle">@{post.author.username}</span>
+          {!hervor && <><span className="handle" aria-hidden="true">·</span>
+            <button type="button" className="zeit" onClick={(e) => { e.stopPropagation(); onNavigate('post', post.id); }} aria-label={`Open post from ${new Date(post.createdAt).toLocaleString()}`}>
+              <time dateTime={post.createdAt}>{formatTime(post.createdAt)}</time></button></>}
+          {canDelete && (
+            <button type="button" className="knopf rund ohne loeschen" onClick={tun('delete')} aria-label="Delete post" title="Delete">
+              <Trash2 size={18} aria-hidden="true" />
+            </button>
+          )}
+        </div>
+        {post.replyTo && <div className="antwort-hinweis">Reply in a thread</div>}
+        {post.content && <div className="inhalt"><PostContent content={post.content} onHashtag={onHashtag} /></div>}
+        {post.imageUrl && (
+          <button type="button" className="bild" onClick={(e) => { e.stopPropagation(); onLightbox(post.imageUrl); }} aria-label="Show image larger">
+            <img src={post.imageUrl} alt="" loading="lazy" />
+          </button>
+        )}
+        {hervor && <div className="detail-zeit"><time dateTime={post.createdAt}>{new Date(post.createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</time></div>}
+        <div className="aktionen">
+          <button type="button" className="aktion antwort" onClick={(e) => { e.stopPropagation(); onNavigate('post', post.id); }} aria-label={`Reply, ${post.counts?.replies || 0} replies`}>
+            <MessageCircle aria-hidden="true" /><span>{post.counts?.replies || 0}</span>
+          </button>
+          <button type="button" className={`aktion repost${reposted ? ' an' : ''}${pop === 'repost' ? ' pop' : ''}`} onClick={tun('repost')}
+            aria-pressed={!!reposted} aria-label={`Repost, ${post.counts?.reposts || 0}`}>
+            <Repeat2 aria-hidden="true" /><span>{post.counts?.reposts || 0}</span>
+          </button>
+          <button type="button" className={`aktion like${liked ? ' an' : ''}${pop === 'like' ? ' pop' : ''}`} onClick={tun('like')}
+            aria-pressed={!!liked} aria-label={`Like, ${post.counts?.likes || 0}`}>
+            <Heart aria-hidden="true" /><span>{post.counts?.likes || 0}</span>
+          </button>
         </div>
       </div>
-    </div>
+    </article>
   );
 }
 
-// ============================================================
-// SIDEBAR + MOBILE NAV
-// ============================================================
+// ============================================================ Navigation
+const NAV = [
+  { id: 'feed', label: 'Home', icon: Home },
+  { id: 'explore', label: 'Explore', icon: Hash },
+  { id: 'messages', label: 'Messages', icon: MessageCircle },
+  { id: 'profile', label: 'Profile', icon: User },
+];
+
 function Sidebar({ currentUser, currentView, onNavigate, onLogout, onCompose, unreadDMs }) {
-  const items = [
-    { id: 'feed', label: 'home', icon: Home },
-    { id: 'explore', label: 'explore', icon: Hash },
-    { id: 'messages', label: 'messages', icon: MessageSquare, badge: unreadDMs },
-    { id: 'profile', label: 'profile', icon: User, payload: currentUser.id },
-    { id: 'settings', label: 'settings', icon: Settings },
-  ];
+  const items = [...NAV, { id: 'settings', label: 'Settings', icon: Settings }];
   return (
-    <aside className="w-56 shrink-0 border-r border-green-500/20 bg-black/80 sticky top-0 h-screen p-4 flex-col hidden md:flex">
-      <div className="text-green-400 font-bold tracking-widest text-lg mb-1 glow">N E X U S</div>
-      <div className="text-green-500/40 text-[10px] tracking-wider mb-8">// terminal v2.5</div>
-      <nav className="space-y-1 mb-6">
+    <aside className="seitenleiste" aria-label="Navigation">
+      <button type="button" className="marke" onClick={() => onNavigate('feed')} aria-label="Nexus – Home">
+        <img src="/logo.svg" alt="" width="38" height="38" /><span>nexus<span className="punkt">.</span></span>
+      </button>
+      <nav style={{ display: 'grid', gap: 4 }}>
         {items.map((item) => {
           const Icon = item.icon;
-          const active = currentView === item.id;
+          const aktiv = currentView === item.id;
           return (
-            <button key={item.id} onClick={() => onNavigate(item.id, item.payload)}
-              className={`w-full flex items-center gap-3 px-3 py-2 text-sm transition-colors border ${active ? 'border-green-400 bg-green-400/10 text-green-300' : 'border-transparent text-green-500/70 hover:text-green-300 hover:border-green-500/30'}`}>
-              <Icon size={16} /><span className="tracking-wider">{item.label}</span>
-              {item.badge > 0 && (
-                <span className="ml-auto bg-green-400 text-black text-[10px] px-1.5 font-bold">{item.badge > 99 ? '99+' : item.badge}</span>
-              )}
+            <button key={item.id} type="button" className="nav-punkt" aria-current={aktiv ? 'page' : undefined}
+              onClick={() => onNavigate(item.id, item.id === 'profile' ? currentUser.id : null)}>
+              <Icon aria-hidden="true" strokeWidth={aktiv ? 2.4 : 2} /><span>{item.label}</span>
+              {item.id === 'messages' && unreadDMs > 0 && <span className="badge" aria-label={`${unreadDMs} unread`}>{unreadDMs > 99 ? '99+' : unreadDMs}</span>}
             </button>
           );
         })}
       </nav>
-      <button onClick={onCompose}
-        className="w-full border border-green-400 text-green-300 hover:bg-green-400 hover:text-black py-2 px-3 font-bold tracking-wider text-sm transition-colors mb-auto">
-        [ + NEW POST ]
-      </button>
-      <div className="mt-6 pt-4 border-t border-green-500/20">
-        <div className="flex items-center gap-2 mb-3">
-          <Avatar user={currentUser} size={32} />
-          <div className="min-w-0 flex-1">
-            <div className="text-green-300 text-xs truncate">{currentUser.displayName}</div>
-            <div className="text-green-500/50 text-[10px] truncate">@{currentUser.username}</div>
-          </div>
-        </div>
-        <button onClick={onLogout}
-          className="w-full flex items-center justify-center gap-2 text-xs text-green-500/60 hover:text-red-400 py-1.5 border border-green-500/20 hover:border-red-500/40 transition-colors">
-          <Power size={12} /> LOGOUT
-        </button>
+      <button type="button" className="knopf primaer gross neu" onClick={onCompose}><SquarePen size={20} aria-hidden="true" />New Post</button>
+      <div className="konto">
+        <Avatar user={currentUser} size={40} />
+        <div className="wer"><strong>{currentUser.displayName}</strong><span>@{currentUser.username}</span></div>
+        <button type="button" className="knopf rund ohne" onClick={onLogout} aria-label="Log out" title="Log out"><LogOut size={20} aria-hidden="true" /></button>
       </div>
     </aside>
   );
 }
 
-function MobileNav({ currentView, onNavigate, currentUser, onCompose, unreadDMs }) {
+function TabLeiste({ currentView, onNavigate, currentUser, unreadDMs }) {
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-black/95 border-t border-green-500/30 flex items-center justify-around py-2 z-30 backdrop-blur">
-      <button onClick={() => onNavigate('feed')} className={`p-3 ${currentView === 'feed' ? 'text-green-300' : 'text-green-500/50'}`}><Home size={20} /></button>
-      <button onClick={() => onNavigate('explore')} className={`p-3 ${currentView === 'explore' ? 'text-green-300' : 'text-green-500/50'}`}><Hash size={20} /></button>
-      <button onClick={onCompose} className="bg-green-400 text-black p-3"><Send size={20} /></button>
-      <button onClick={() => onNavigate('messages')} className={`p-3 relative ${currentView === 'messages' ? 'text-green-300' : 'text-green-500/50'}`}>
-        <MessageSquare size={20} />
-        {unreadDMs > 0 && <span className="absolute top-1 right-1 bg-green-400 text-black text-[9px] px-1 font-bold">{unreadDMs > 9 ? '9+' : unreadDMs}</span>}
-      </button>
-      <button onClick={() => onNavigate('profile', currentUser.id)} className={`p-3 ${currentView === 'profile' ? 'text-green-300' : 'text-green-500/50'}`}><User size={20} /></button>
+    <nav className="tableiste" aria-label="Navigation">
+      {NAV.map((item) => {
+        const Icon = item.icon;
+        const aktiv = currentView === item.id;
+        return (
+          <button key={item.id} type="button" className="tab" aria-current={aktiv ? 'page' : undefined}
+            onClick={() => onNavigate(item.id, item.id === 'profile' ? currentUser.id : null)}>
+            <Icon aria-hidden="true" strokeWidth={aktiv ? 2.4 : 1.9} />{item.label}
+            {item.id === 'messages' && unreadDMs > 0 && <span className="badge" aria-label={`${unreadDMs} unread`}>{unreadDMs > 9 ? '9+' : unreadDMs}</span>}
+          </button>
+        );
+      })}
     </nav>
   );
 }
 
-// ============================================================
-// FEED
-// ============================================================
-function FeedView({ currentUser, onNavigate, onHashtag, onLightbox, refreshKey, onRefresh }) {
+// Aktion „Neuer Beitrag“ in der Kopfleiste (schmal) – Tabs navigieren nur
+const NeuKnopf = ({ onCompose }) => (
+  <button type="button" className="knopf rund nur-schmal" onClick={onCompose} aria-label="New post" style={{ color: 'var(--akzent)' }}>
+    <SquarePen size={22} aria-hidden="true" />
+  </button>
+);
+
+// Gemeinsame Aktionen für Beitragslisten
+function useBeitragsAktionen(finde, load, onRefresh, nachLoeschen) {
+  return async (action, id) => {
+    try {
+      if (action === 'like') {
+        const p = finde(id);
+        if (!p) return;
+        if (p.viewer?.liked) await api.unlike(id); else await api.like(id);
+      } else if (action === 'repost') {
+        await api.createPost({ repostOf: id });
+      } else if (action === 'delete') {
+        if (!window.confirm('Delete this post? This can’t be undone.')) return;
+        await api.deletePost(id);
+        if (nachLoeschen && nachLoeschen(id)) return;
+      }
+      load(); onRefresh();
+    } catch (e) { console.error(e); }
+  };
+}
+
+// ============================================================ Feed
+function FeedView({ currentUser, onNavigate, onHashtag, onLightbox, refreshKey, onRefresh, onCompose }) {
   const [tab, setTab] = useState('all');
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -550,70 +562,37 @@ function FeedView({ currentUser, onNavigate, onHashtag, onLightbox, refreshKey, 
     catch (e) { console.error(e); }
     setLoading(false);
   }, [tab]);
-
   useEffect(() => { load(); }, [load, refreshKey]);
 
-  const handleAction = async (action, id) => {
-    try {
-      if (action === 'like') {
-        const p = posts.find((x) => x.id === id);
-        if (!p) return;
-        if (p.viewer.liked) await api.unlike(id); else await api.like(id);
-      } else if (action === 'repost') {
-        await api.createPost({ repostOf: id });
-      } else if (action === 'delete') {
-        await api.deletePost(id);
-      }
-      load(); onRefresh();
-    } catch (e) { console.error(e); }
-  };
-
-  const createPost = async ({ content, imageUrl }) => {
-    await api.createPost({ content, imageUrl });
-    load(); onRefresh();
-  };
+  const handleAction = useBeitragsAktionen((id) => posts.find((x) => x.id === id), load, onRefresh);
+  const createPost = async ({ content, imageUrl }) => { await api.createPost({ content, imageUrl }); load(); onRefresh(); };
 
   return (
-    <div>
-      <div className="sticky top-0 bg-black/90 backdrop-blur z-20 border-b border-green-500/30">
-        <div className="flex items-center justify-between px-4 py-3">
-          <div className="text-green-300 font-bold tracking-wider text-sm">~/ FEED</div>
-          <div className="flex items-center gap-2 text-[10px] text-green-500/40">
-            <Activity size={10} className="animate-pulse text-green-400" /> LIVE
-          </div>
-        </div>
-        <div className="flex border-t border-green-500/20">
-          {['all', 'following'].map((t) => (
-            <button key={t} onClick={() => setTab(t)}
-              className={`flex-1 py-2.5 text-xs tracking-widest uppercase transition-colors ${tab === t ? 'text-green-300 border-b-2 border-green-400' : 'text-green-500/50 hover:text-green-400 border-b-2 border-transparent'}`}>
-              {t}
-            </button>
-          ))}
-        </div>
-      </div>
-      <Composer user={currentUser} onSubmit={createPost} />
-      {loading && <div className="p-12 text-center text-green-500/40"><Loader2 className="animate-spin mx-auto mb-2" /> loading feed...</div>}
+    <>
+      <Kopf titel="Home" marke>
+        <span className="live nur-breit" title="New posts appear automatically"><span className="punkt-live" aria-hidden="true" />Live</span>
+        <NeuKnopf onCompose={onCompose} />
+      </Kopf>
+      <Segmente label="Feed" werte={[['all', 'For You'], ['following', 'Following']]} wert={tab} onChange={setTab} />
+      <div className="karte nur-breit"><Composer user={currentUser} onSubmit={createPost} /></div>
+      {loading && posts.length === 0 && <Laedt text="Loading posts…" />}
       {!loading && posts.length === 0 && (
-        <div className="p-12 text-center text-green-500/40 text-sm">
-          <div>┌──────────────────────┐</div>
-          <div>│ no signal in buffer │</div>
-          <div className="mb-4">└──────────────────────┘</div>
-          {tab === 'following' && <div className="text-xs">&gt; follow some users to see their posts</div>}
-        </div>
+        tab === 'following'
+          ? <Leer icon={UserPlus} titel="Nothing Here Yet" text="Follow people to see their posts in this tab."><button type="button" className="knopf primaer" onClick={() => onNavigate('explore')}>Find People</button></Leer>
+          : <Leer titel="No Posts Yet" text="Be the first to share something."><button type="button" className="knopf primaer" onClick={onCompose}>New Post</button></Leer>
       )}
-      {!loading && posts.map((post) => (
-        <PostCard key={post.id} post={post} currentUser={currentUser}
-          onAction={handleAction} onNavigate={onNavigate} onHashtag={onHashtag} onLightbox={onLightbox} />
-      ))}
-    </div>
+      <div className="liste">
+        {posts.map((post) => (
+          <PostCard key={post.id} post={post} currentUser={currentUser} onAction={handleAction} onNavigate={onNavigate} onHashtag={onHashtag} onLightbox={onLightbox} />
+        ))}
+      </div>
+    </>
   );
 }
 
-// ============================================================
-// EXPLORE
-// ============================================================
-function ExploreView({ currentUser, hashtag, onNavigate, onHashtag, onLightbox, refreshKey, onRefresh }) {
-  const [query, setQuery] = useState('');
+// ============================================================ Explore
+function ExploreView({ currentUser, hashtag, initialQuery = '', onNavigate, onHashtag, onLightbox, refreshKey, onRefresh, onCompose }) {
+  const [query, setQuery] = useState(initialQuery);
   const [posts, setPosts] = useState([]);
   const [trending, setTrending] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -621,86 +600,66 @@ function ExploreView({ currentUser, hashtag, onNavigate, onHashtag, onLightbox, 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [feed, trend] = await Promise.all([
-        hashtag ? api.getFeed('all', hashtag) : api.getFeed('all'),
-        api.trending(),
-      ]);
+      const [feed, trend] = await Promise.all([hashtag ? api.getFeed('all', hashtag) : api.getFeed('all'), api.trending()]);
       setPosts(feed.posts || []); setTrending(trend.tags || []);
     } catch (e) { console.error(e); }
     setLoading(false);
   }, [hashtag]);
-
   useEffect(() => { load(); }, [load, refreshKey]);
+  useEffect(() => { setQuery(initialQuery); }, [initialQuery]);
 
-  const handleAction = async (action, id) => {
-    try {
-      if (action === 'like') {
-        const p = posts.find((x) => x.id === id);
-        if (p?.viewer.liked) await api.unlike(id); else await api.like(id);
-      } else if (action === 'repost') { await api.createPost({ repostOf: id }); }
-      else if (action === 'delete') { await api.deletePost(id); }
-      load(); onRefresh();
-    } catch (e) { console.error(e); }
-  };
-
-  const filtered = query.trim()
-    ? posts.filter((p) => p.content.toLowerCase().includes(query.toLowerCase()) ||
-      p.author?.username.toLowerCase().includes(query.toLowerCase()) ||
-      p.author?.displayName.toLowerCase().includes(query.toLowerCase()))
+  const handleAction = useBeitragsAktionen((id) => posts.find((x) => x.id === id), load, onRefresh);
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? posts.filter((p) => (p.content || '').toLowerCase().includes(q) || p.author?.username.toLowerCase().includes(q) || p.author?.displayName.toLowerCase().includes(q))
     : posts;
 
   return (
-    <div>
-      <div className="sticky top-0 bg-black/90 backdrop-blur z-20 border-b border-green-500/30 px-4 py-3 flex items-center gap-3">
-        {hashtag ? (
-          <>
-            <button onClick={() => onNavigate('explore')} className="text-green-500/60 hover:text-green-300"><ArrowLeft size={18} /></button>
-            <div>
-              <div className="text-green-300 font-bold tracking-wider">#{hashtag}</div>
-              <div className="text-green-500/50 text-xs">{posts.length} posts</div>
-            </div>
-          </>
-        ) : (
-          <>
-            <Search size={16} className="text-green-500/60" />
-            <input value={query} onChange={(e) => setQuery(e.target.value)}
-              placeholder="$ search posts, users, tags..."
-              className="bg-transparent flex-1 outline-none text-green-300 placeholder:text-green-500/40 text-sm" />
-          </>
-        )}
-      </div>
-      {!hashtag && !query && (
-        <div className="border-b border-green-500/20 p-4">
-          <div className="flex items-center gap-2 text-green-300 text-sm font-bold tracking-wider mb-3"><TrendingUp size={14} /> TRENDING</div>
-          {trending.length === 0 ? (
-            <div className="text-green-500/40 text-xs">&gt; no trends yet</div>
-          ) : (
-            <div className="grid grid-cols-2 gap-2">
+    <>
+      {hashtag ? (
+        <Kopf titel={`#${hashtag}`} unter={`${posts.length} ${posts.length === 1 ? 'post' : 'posts'}`} onBack={() => onNavigate('explore')} backLabel="Explore">
+          <NeuKnopf onCompose={onCompose} />
+        </Kopf>
+      ) : (
+        <Kopf titel="Explore" marke><NeuKnopf onCompose={onCompose} /></Kopf>
+      )}
+      {!hashtag && (
+        <label className="suchfeld" style={{ marginTop: 12 }}>
+          <Search aria-hidden="true" />
+          <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search posts and people" aria-label="Search posts and people" enterKeyHint="search" />
+        </label>
+      )}
+      {!hashtag && !q && (
+        <section className="karte" style={{ padding: 16, marginTop: 12 }} aria-labelledby="trends-titel">
+          <h2 id="trends-titel" style={{ fontSize: '1.125rem', fontWeight: 800, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <TrendingUp size={20} aria-hidden="true" style={{ color: 'var(--akzent)' }} />Trending
+          </h2>
+          {trending.length === 0 ? <p className="leise">No trends yet – add a #hashtag to your next post.</p> : (
+            <div className="trends">
               {trending.map(({ tag, c }) => (
-                <button key={tag} onClick={() => onHashtag(tag)}
-                  className="text-left border border-green-500/20 hover:border-green-400 hover:bg-green-500/5 p-2 transition-colors">
-                  <div className="text-cyan-400 text-sm">#{tag}</div>
-                  <div className="text-green-500/50 text-[10px]">{c} post{c !== 1 ? 's' : ''}</div>
+                <button key={tag} type="button" className="trend" onClick={() => onHashtag(tag)}>
+                  <strong>#{tag}</strong><span>{c} {c === 1 ? 'post' : 'posts'}</span>
                 </button>
               ))}
             </div>
           )}
-        </div>
+        </section>
       )}
-      {loading ? <div className="p-12 text-center text-green-500/40"><Loader2 className="animate-spin mx-auto" /></div>
-        : filtered.length === 0 ? <div className="p-12 text-center text-green-500/40 text-sm">&gt; no results</div>
-        : filtered.map((p) => (
-          <PostCard key={p.id} post={p} currentUser={currentUser}
-            onAction={handleAction} onNavigate={onNavigate} onHashtag={onHashtag} onLightbox={onLightbox} />
-        ))}
-    </div>
+      {loading && posts.length === 0 ? <Laedt /> : filtered.length === 0
+        ? <Leer icon={Search} titel="No Results" text={q ? `Nothing matches “${query.trim()}”. Try another word.` : 'No posts here yet.'} />
+        : (
+          <div className="liste">
+            {filtered.map((p) => (
+              <PostCard key={p.id} post={p} currentUser={currentUser} onAction={handleAction} onNavigate={onNavigate} onHashtag={onHashtag} onLightbox={onLightbox} />
+            ))}
+          </div>
+        )}
+    </>
   );
 }
 
-// ============================================================
-// PROFILE
-// ============================================================
-function ProfileView({ userId, currentUser, onNavigate, onHashtag, onLightbox, refreshKey, onRefresh }) {
+// ============================================================ Profil
+function ProfileView({ userId, currentUser, onNavigate, onHashtag, onLightbox, refreshKey, onRefresh, onCompose }) {
   const [data, setData] = useState(null);
   const [posts, setPosts] = useState([]);
   const [replies, setReplies] = useState([]);
@@ -710,101 +669,66 @@ function ProfileView({ userId, currentUser, onNavigate, onHashtag, onLightbox, r
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [u, p, r] = await Promise.all([
-        api.getUser(userId),
-        api.getUserPosts(userId, false),
-        api.getUserPosts(userId, true),
-      ]);
+      const [u, p, r] = await Promise.all([api.getUser(userId), api.getUserPosts(userId, false), api.getUserPosts(userId, true)]);
       setData(u); setPosts(p.posts || []); setReplies(r.posts || []);
     } catch (e) { console.error(e); }
     setLoading(false);
   }, [userId]);
-
   useEffect(() => { load(); }, [load, refreshKey]);
 
   const toggleFollow = async () => {
     if (data.viewer.isFollowing) await api.unfollow(userId); else await api.follow(userId);
     load(); onRefresh();
   };
-  const handleAction = async (action, id) => {
-    try {
-      if (action === 'like') {
-        const all = [...posts, ...replies];
-        const p = all.find((x) => x.id === id);
-        if (p?.viewer.liked) await api.unlike(id); else await api.like(id);
-      } else if (action === 'repost') { await api.createPost({ repostOf: id }); }
-      else if (action === 'delete') { await api.deletePost(id); }
-      load(); onRefresh();
-    } catch (e) { console.error(e); }
-  };
+  const handleAction = useBeitragsAktionen((id) => [...posts, ...replies].find((x) => x.id === id), load, onRefresh);
 
-  if (loading || !data) return <div className="p-12 text-center text-green-500/40"><Loader2 className="animate-spin mx-auto" /></div>;
+  if (!data) return <><Kopf titel="Profile" onBack={() => onNavigate('feed')} backLabel="Home" />{loading ? <Laedt /> : <Leer icon={User} titel="Profile Not Found" />}</>;
   const list = tab === 'posts' ? posts : replies;
   const u = data.user;
 
   return (
-    <div>
-      <div className="sticky top-0 bg-black/90 backdrop-blur z-20 border-b border-green-500/30 px-4 py-3 flex items-center gap-3">
-        <button onClick={() => onNavigate('feed')} className="text-green-500/60 hover:text-green-300"><ArrowLeft size={18} /></button>
-        <div className="text-green-300 font-bold tracking-wider text-sm">~/ {u.username}</div>
-      </div>
-      <div className="border-b border-green-500/20 p-6">
-        <div className="flex items-start justify-between mb-4">
-          <Avatar user={u} size={80} />
-          <div className="flex items-center gap-2">
+    <>
+      <Kopf titel={u.displayName} unter={`${data.counts.posts} ${data.counts.posts === 1 ? 'post' : 'posts'}`} onBack={() => onNavigate('feed')} backLabel="Home">
+        <NeuKnopf onCompose={onCompose} />
+      </Kopf>
+      <section className="karte profil" aria-label="Profile">
+        <div className="oben">
+          <Avatar user={u} size={88} />
+          <div className="knoepfe">
             {!data.viewer.isSelf && (
-              <button onClick={() => onNavigate('dm', userId)}
-                className="border border-green-500/40 text-green-400 hover:border-green-400 hover:text-green-300 px-4 py-1.5 text-xs font-bold tracking-wider flex items-center gap-2">
-                <MessageSquare size={12} /> MESSAGE
-              </button>
+              <button type="button" className="knopf umriss" onClick={() => onNavigate('dm', userId)}><MessageCircle size={18} aria-hidden="true" />Message</button>
             )}
             {data.viewer.isSelf ? (
-              <button onClick={() => onNavigate('settings')}
-                className="border border-green-500/40 text-green-400 hover:border-green-400 px-4 py-1.5 text-xs font-bold tracking-wider flex items-center gap-2">
-                <Settings size={12} /> EDIT
+              <button type="button" className="knopf umriss" onClick={() => onNavigate('settings')}><Settings size={18} aria-hidden="true" />Edit Profile</button>
+            ) : data.viewer.isFollowing ? (
+              <button type="button" className="knopf umriss folge-ich" onClick={toggleFollow} aria-label={`Following – unfollow @${u.username}`}>
+                <Check size={18} aria-hidden="true" />Following
               </button>
             ) : (
-              <button onClick={toggleFollow}
-                className={`border px-4 py-1.5 text-xs font-bold tracking-wider transition-colors flex items-center gap-2 ${data.viewer.isFollowing ? 'border-green-500/40 text-green-400 hover:border-red-500 hover:text-red-400' : 'border-green-400 text-green-300 hover:bg-green-400 hover:text-black'}`}>
-                {data.viewer.isFollowing ? <><UserMinus size={12} /> UNFOLLOW</> : <><UserPlus size={12} /> FOLLOW</>}
-              </button>
+              <button type="button" className="knopf primaer" onClick={toggleFollow}><UserPlus size={18} aria-hidden="true" />Follow</button>
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2 mb-1">
-          <div className="text-green-200 font-bold text-lg">{u.displayName}</div>
-          {u.isOwner && <span className="text-[9px] bg-green-400 text-black px-1.5 py-0.5 font-bold tracking-wider">ROOT</span>}
+        <h2>{u.displayName} <Abzeichen user={u} /></h2>
+        <div className="handle">@{u.username}</div>
+        {u.bio && <p className="bio"><PostContent content={u.bio} onHashtag={onHashtag} /></p>}
+        <div className="zahlen">
+          <span><strong>{data.counts.following}</strong> Following</span>
+          <span><strong>{data.counts.followers}</strong> {data.counts.followers === 1 ? 'Follower' : 'Followers'}</span>
         </div>
-        <div className="text-green-500/60 text-sm">@{u.username}</div>
-        {u.bio && (
-          <div className="text-green-300/80 text-sm mt-3 whitespace-pre-wrap leading-relaxed">
-            <PostContent content={u.bio} onHashtag={onHashtag} />
-          </div>
-        )}
-        <div className="flex gap-5 mt-4 text-xs">
-          <div><span className="text-green-300 font-bold">{data.counts.following}</span><span className="text-green-500/60"> following</span></div>
-          <div><span className="text-green-300 font-bold">{data.counts.followers}</span><span className="text-green-500/60"> followers</span></div>
-          <div><span className="text-green-300 font-bold">{data.counts.posts}</span><span className="text-green-500/60"> posts</span></div>
-        </div>
-      </div>
-      <div className="flex border-b border-green-500/20">
-        {['posts', 'replies'].map((t) => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`flex-1 py-2.5 text-xs tracking-widest uppercase transition-colors ${tab === t ? 'text-green-300 border-b-2 border-green-400' : 'text-green-500/50 hover:text-green-400 border-b-2 border-transparent'}`}>{t}</button>
-        ))}
-      </div>
-      {list.length === 0 ? <div className="p-12 text-center text-green-500/40 text-sm">&gt; no {tab} yet</div>
-        : list.map((p) => (
-          <PostCard key={p.id} post={p} currentUser={currentUser}
-            onAction={handleAction} onNavigate={onNavigate} onHashtag={onHashtag} onLightbox={onLightbox} />
-        ))}
-    </div>
+      </section>
+      <Segmente label="Profile" werte={[['posts', 'Posts'], ['replies', 'Replies']]} wert={tab} onChange={setTab} />
+      {list.length === 0
+        ? <Leer icon={tab === 'posts' ? SquarePen : MessageCircle} titel={tab === 'posts' ? 'No Posts Yet' : 'No Replies Yet'}
+            text={data.viewer.isSelf ? (tab === 'posts' ? 'Share your first post.' : 'Replies you write appear here.') : undefined} />
+        : <div className="liste">{list.map((p) => (
+            <PostCard key={p.id} post={p} currentUser={currentUser} onAction={handleAction} onNavigate={onNavigate} onHashtag={onHashtag} onLightbox={onLightbox} />
+          ))}</div>}
+    </>
   );
 }
 
-// ============================================================
-// POST DETAIL
-// ============================================================
+// ============================================================ Thread
 function PostDetailView({ postId, currentUser, onNavigate, onHashtag, onLightbox, refreshKey, onRefresh }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -815,104 +739,38 @@ function PostDetailView({ postId, currentUser, onNavigate, onHashtag, onLightbox
     catch { setData({ error: true }); }
     setLoading(false);
   }, [postId]);
-
   useEffect(() => { load(); }, [load, refreshKey]);
 
-  const handleAction = async (action, id) => {
-    try {
-      if (action === 'like') {
-        const all = [data.post, ...data.parents, ...data.replies].filter(Boolean);
-        const p = all.find((x) => x.id === id);
-        if (p?.viewer.liked) await api.unlike(id); else await api.like(id);
-      } else if (action === 'repost') { await api.createPost({ repostOf: id }); }
-      else if (action === 'delete') {
-        await api.deletePost(id);
-        if (id === postId) { onNavigate('feed'); return; }
-      }
-      load(); onRefresh();
-    } catch (e) { console.error(e); }
-  };
-  const createReply = async ({ content, imageUrl }) => {
-    await api.createPost({ content, imageUrl, replyTo: postId });
-    load(); onRefresh();
-  };
+  const handleAction = useBeitragsAktionen(
+    (id) => [data?.post, ...(data?.parents || []), ...(data?.replies || [])].filter(Boolean).find((x) => x.id === id),
+    load, onRefresh, (id) => { if (id === postId) { onNavigate('feed'); return true; } return false; });
+  const createReply = async ({ content, imageUrl }) => { await api.createPost({ content, imageUrl, replyTo: postId }); load(); onRefresh(); };
 
-  if (loading) return <div className="p-12 text-center text-green-500/40"><Loader2 className="animate-spin mx-auto" /></div>;
+  if (loading && !data) return <><Kopf titel="Post" onBack={() => onNavigate('feed')} backLabel="Home" /><Laedt /></>;
   if (!data || data.error) return (
-    <div>
-      <div className="sticky top-0 bg-black/90 border-b border-green-500/30 px-4 py-3 flex items-center gap-3">
-        <button onClick={() => onNavigate('feed')} className="text-green-500/60"><ArrowLeft size={18} /></button>
-        <div className="text-green-300 text-sm">~/ post</div>
-      </div>
-      <div className="p-12 text-center text-red-400/60 text-sm">// post not found</div>
-    </div>
+    <><Kopf titel="Post" onBack={() => onNavigate('feed')} backLabel="Home" />
+      <Leer icon={AlertCircle} titel="Post Not Available" text="It may have been deleted."><button type="button" className="knopf primaer" onClick={() => onNavigate('feed')}>Back to Home</button></Leer></>
   );
-
   const { post, parents, replies } = data;
   return (
-    <div>
-      <div className="sticky top-0 bg-black/90 backdrop-blur z-20 border-b border-green-500/30 px-4 py-3 flex items-center gap-3">
-        <button onClick={() => onNavigate('feed')} className="text-green-500/60 hover:text-green-300"><ArrowLeft size={18} /></button>
-        <div className="text-green-300 font-bold tracking-wider text-sm">~/ thread</div>
+    <>
+      <Kopf titel="Post" onBack={() => onNavigate('feed')} backLabel="Home" />
+      <div className="liste">
+        {parents.map((p) => (
+          <PostCard key={p.id} post={p} currentUser={currentUser} onAction={handleAction} onNavigate={onNavigate} onHashtag={onHashtag} onLightbox={onLightbox} />
+        ))}
+        <PostCard post={post} currentUser={currentUser} onAction={handleAction} onNavigate={onNavigate} onHashtag={onHashtag} onLightbox={onLightbox} hervor />
+        <div className="karte"><Composer user={currentUser} onSubmit={createReply} replyTo={post.author} /></div>
+        {replies.map((r) => (
+          <PostCard key={r.id} post={r} currentUser={currentUser} onAction={handleAction} onNavigate={onNavigate} onHashtag={onHashtag} onLightbox={onLightbox} />
+        ))}
       </div>
-      {parents.map((p) => (
-        <PostCard key={p.id} post={p} currentUser={currentUser}
-          onAction={handleAction} onNavigate={onNavigate} onHashtag={onHashtag} onLightbox={onLightbox} />
-      ))}
-      <div className="border-b border-green-500/30 p-5 bg-green-500/[0.02]">
-        <div className="flex items-center gap-3 mb-3">
-          <Avatar user={post.author} size={48} onClick={() => onNavigate('profile', post.authorId)} />
-          <div className="flex-1">
-            <div className="flex items-center gap-1.5">
-              <span className="font-bold text-green-300 hover:underline cursor-pointer" onClick={() => onNavigate('profile', post.authorId)}>
-                {post.author.displayName}
-              </span>
-              {post.author.isOwner && <span className="text-[9px] bg-green-400 text-black px-1 font-bold tracking-wider">ROOT</span>}
-            </div>
-            <div className="text-green-500/50 text-sm">@{post.author.username}</div>
-          </div>
-          {(currentUser.id === post.authorId || currentUser.isOwner) && (
-            <button onClick={() => handleAction('delete', post.id)} className="text-green-500/40 hover:text-red-400 p-1">
-              <Trash2 size={14} />
-            </button>
-          )}
-        </div>
-        <div className="text-green-100/90 text-base mb-3"><PostContent content={post.content} onHashtag={onHashtag} /></div>
-        {post.imageUrl && (
-          <div className="mb-3 border border-green-500/20 inline-block max-w-full cursor-zoom-in"
-            onClick={() => onLightbox(post.imageUrl)}>
-            <img src={post.imageUrl} className="max-h-96 max-w-full object-contain" />
-          </div>
-        )}
-        <div className="text-xs text-green-500/50 pb-3 border-b border-green-500/20">
-          {new Date(post.createdAt).toLocaleString()}
-        </div>
-        <div className="flex items-center gap-6 mt-3 text-green-500/60 text-xs">
-          <div className="flex items-center gap-1.5"><MessageCircle size={14} /> <span>{post.counts.replies}</span></div>
-          <button onClick={() => handleAction('repost', post.id)}
-            className={`flex items-center gap-1.5 hover:text-green-300 ${post.viewer.reposted ? 'text-green-300' : ''}`}>
-            <Repeat2 size={14} /> <span>{post.counts.reposts}</span>
-          </button>
-          <button onClick={() => handleAction('like', post.id)}
-            className={`flex items-center gap-1.5 hover:text-pink-400 ${post.viewer.liked ? 'text-pink-400' : ''}`}>
-            <Heart size={14} fill={post.viewer.liked ? 'currentColor' : 'none'} />
-            <span>{post.counts.likes}</span>
-          </button>
-        </div>
-      </div>
-      <Composer user={currentUser} onSubmit={createReply} replyTo={post.author} compact />
-      {replies.map((r) => (
-        <PostCard key={r.id} post={r} currentUser={currentUser}
-          onAction={handleAction} onNavigate={onNavigate} onHashtag={onHashtag} onLightbox={onLightbox} />
-      ))}
-    </div>
+    </>
   );
 }
 
-// ============================================================
-// SETTINGS
-// ============================================================
-function SettingsView({ currentUser, onNavigate, onUserUpdated }) {
+// ============================================================ Einstellungen
+function SettingsView({ currentUser, onNavigate, onUserUpdated, onLogout }) {
   const [displayName, setDisplayName] = useState(currentUser.displayName);
   const [bio, setBio] = useState(currentUser.bio || '');
   const [avatar, setAvatar] = useState(currentUser.avatar);
@@ -920,13 +778,14 @@ function SettingsView({ currentUser, onNavigate, onUserUpdated }) {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
   const fileRef = useRef(null);
+  const gesperrt = currentUser.isOwner;
 
   const handleAvatar = async (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    if (!f.type.startsWith('image/')) { setError('image only'); return; }
+    if (!f.type.startsWith('image/')) { setError('Please choose an image.'); return; }
     try { setAvatar(await compressImage(f, 200, 0.75)); }
-    catch { setError('could not process image'); }
+    catch { setError('Could not process the image.'); }
   };
   const save = async () => {
     setError(''); setSaving(true);
@@ -934,63 +793,45 @@ function SettingsView({ currentUser, onNavigate, onUserUpdated }) {
       const r = await api.updateMe({ displayName, bio, avatar });
       onUserUpdated(r.user);
       setSaved(true); setTimeout(() => setSaved(false), 2000);
-    } catch (e) { setError(e.message || 'save failed'); }
+    } catch (e) { setError(e.message || 'Could not save.'); }
     setSaving(false);
   };
 
   return (
-    <div>
-      <div className="sticky top-0 bg-black/90 backdrop-blur z-20 border-b border-green-500/30 px-4 py-3 flex items-center gap-3">
-        <button onClick={() => onNavigate('feed')} className="text-green-500/60 hover:text-green-300"><ArrowLeft size={18} /></button>
-        <div className="text-green-300 font-bold tracking-wider text-sm">~/ settings</div>
+    <>
+      <Kopf titel="Settings" onBack={() => onNavigate('profile', currentUser.id)} backLabel="Profile" />
+      <div className="karte einstellungen">
+        {gesperrt && <div className="hinweis-box warn">This is the system’s owner profile – it can’t be edited here.</div>}
+        <div className="avatar-wahl">
+          <Avatar user={{ ...currentUser, avatar }} size={80} />
+          <button type="button" className="knopf" disabled={gesperrt} onClick={() => fileRef.current?.click()}><ImageIcon size={18} aria-hidden="true" />Change Photo</button>
+          <input ref={fileRef} type="file" accept="image/*" onChange={handleAvatar} hidden />
+        </div>
+        <label className="feld"><span>Display Name</span>
+          <input className="eingabe" disabled={gesperrt} value={displayName} onChange={(e) => setDisplayName(e.target.value)} maxLength={30} />
+        </label>
+        <div className="feld"><span>Username</span>
+          <div className="eingabe" aria-readonly="true" style={{ color: 'var(--text-2)' }}>@{currentUser.username}</div>
+          <small>Usernames can’t be changed.</small>
+        </div>
+        <label className="feld"><span>Bio</span>
+          <textarea className="eingabe" disabled={gesperrt} value={bio} onChange={(e) => setBio(e.target.value)} maxLength={160} rows={3} placeholder="Tell people a little about yourself" />
+          <small style={{ textAlign: 'right' }}>{160 - bio.length} characters left</small>
+        </label>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button type="button" className="knopf primaer" onClick={save} disabled={saving || gesperrt}>
+            {saving ? <Loader2 size={16} className="dreht" aria-hidden="true" /> : saved ? <Check size={16} aria-hidden="true" /> : null}
+            {saved ? 'Saved' : saving ? 'Saving…' : 'Save Changes'}
+          </button>
+          <button type="button" className="knopf gefahr nur-schmal" onClick={onLogout}><LogOut size={18} aria-hidden="true" />Log Out</button>
+        </div>
+        {error && <div className="fehler" role="alert"><AlertCircle size={16} aria-hidden="true" />{error}</div>}
       </div>
-      <div className="p-6 space-y-5">
-        {currentUser.isOwner && (
-          <div className="border border-yellow-500/40 bg-yellow-500/5 p-3 text-xs text-yellow-300">
-            // owner profile is locked / predefined by system
-          </div>
-        )}
-        <div>
-          <div className="text-green-500/70 text-xs mb-2 tracking-wider">$ avatar:</div>
-          <div className="flex items-center gap-4">
-            <Avatar user={{ ...currentUser, avatar }} size={72} />
-            <button type="button" disabled={currentUser.isOwner} onClick={() => fileRef.current?.click()}
-              className="border border-green-500/40 hover:border-green-400 px-3 py-2 text-xs text-green-300 tracking-wider disabled:opacity-30">
-              [ UPLOAD ]
-            </button>
-            <input ref={fileRef} type="file" accept="image/*" onChange={handleAvatar} className="hidden" />
-          </div>
-        </div>
-        <div>
-          <div className="text-green-500/70 text-xs mb-2 tracking-wider">$ display_name:</div>
-          <input disabled={currentUser.isOwner} value={displayName} onChange={(e) => setDisplayName(e.target.value)} maxLength={30}
-            className="w-full bg-black/60 border border-green-500/40 focus:border-green-400 outline-none px-3 py-2 text-green-300 disabled:opacity-50" />
-        </div>
-        <div>
-          <div className="text-green-500/70 text-xs mb-2 tracking-wider">$ username (immutable):</div>
-          <div className="w-full bg-black/30 border border-green-500/20 px-3 py-2 text-green-500/60">@{currentUser.username}</div>
-        </div>
-        <div>
-          <div className="text-green-500/70 text-xs mb-2 tracking-wider">$ bio:</div>
-          <textarea disabled={currentUser.isOwner} value={bio} onChange={(e) => setBio(e.target.value)}
-            maxLength={160} rows={3} placeholder="// tell the network about yourself..."
-            className="w-full bg-black/60 border border-green-500/40 focus:border-green-400 outline-none px-3 py-2 text-green-300 text-sm resize-none disabled:opacity-50" />
-          <div className="text-right text-[10px] text-green-500/40">{160 - bio.length}</div>
-        </div>
-        <button onClick={save} disabled={saving || currentUser.isOwner}
-          className="border border-green-400 text-green-300 hover:bg-green-400 hover:text-black px-4 py-2 text-sm font-bold tracking-wider transition-colors disabled:opacity-30 flex items-center gap-2">
-          {saving ? <Loader2 size={14} className="animate-spin" /> : saved ? <Check size={14} /> : null}
-          {saved ? 'SAVED' : 'SAVE'}
-        </button>
-        {error && <div className="text-red-400 text-xs">{error}</div>}
-      </div>
-    </div>
+    </>
   );
 }
 
-// ============================================================
-// MESSAGES — Thread List
-// ============================================================
+// ============================================================ Nachrichten
 function MessagesView({ currentUser, onNavigate, refreshKey }) {
   const [threads, setThreads] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1002,68 +843,50 @@ function MessagesView({ currentUser, onNavigate, refreshKey }) {
     catch (e) { console.error(e); }
     setLoading(false);
   }, []);
-
   useEffect(() => { load(); }, [load, refreshKey]);
 
   return (
-    <div>
-      <div className="sticky top-0 bg-black/90 backdrop-blur z-20 border-b border-green-500/30 px-4 py-3 flex items-center gap-3">
-        <div className="text-green-300 font-bold tracking-wider text-sm flex items-center gap-2 flex-1">
-          <Inbox size={14} /> ~/ MESSAGES
-        </div>
-        <button onClick={() => setPicking(true)}
-          className="border border-green-400 text-green-300 hover:bg-green-400 hover:text-black px-3 py-1 text-xs font-bold tracking-wider transition-colors">
-          [ + NEW ]
+    <>
+      <Kopf titel="Messages" marke>
+        <button type="button" className="knopf rund" onClick={() => setPicking(true)} aria-label="New message" title="New message" style={{ color: 'var(--akzent)' }}>
+          <SquarePen size={22} aria-hidden="true" />
         </button>
-      </div>
-
-      {loading && <div className="p-12 text-center text-green-500/40"><Loader2 className="animate-spin mx-auto" /></div>}
-
+      </Kopf>
+      {loading && threads.length === 0 && <Laedt />}
       {!loading && threads.length === 0 && (
-        <div className="p-12 text-center text-green-500/40 text-sm">
-          <div>┌─────────────────────────┐</div>
-          <div>│ inbox is empty           │</div>
-          <div className="mb-4">└─────────────────────────┘</div>
-          <div className="text-xs">&gt; tap [+ NEW] to start a conversation</div>
+        <Leer icon={Inbox} titel="No Messages" text="Start a private conversation with anyone on Nexus.">
+          <button type="button" className="knopf primaer" onClick={() => setPicking(true)}>New Message</button>
+        </Leer>
+      )}
+      {threads.length > 0 && (
+        <div className="karte" style={{ marginTop: 12, padding: 4 }}>
+          {threads.map((t, i) => (
+            <div key={t.partner.id}>
+              {i > 0 && <div className="trennstrich" />}
+              <button type="button" className={`faden${t.unread > 0 ? ' ungelesen' : ''}`} onClick={() => onNavigate('dm', t.partner.id)}>
+                <Avatar user={t.partner} size={48} />
+                <div className="rumpf">
+                  <div className="oben">
+                    <strong>{t.partner.displayName}</strong><Abzeichen user={t.partner} />
+                    <span className="leise" style={{ fontSize: 'var(--t-mini)' }}>@{t.partner.username}</span>
+                    <span className="zeit">{formatTime(t.lastMessage.createdAt)}</span>
+                  </div>
+                  <div className="vorschau">
+                    <span>{t.lastMessage.isMine ? 'You: ' : ''}{t.lastMessage.content}</span>
+                    {t.unread > 0 && <span className="badge" style={{ flex: 'none' }} aria-label={`${t.unread} unread`}>{t.unread > 99 ? '99+' : t.unread}</span>}
+                  </div>
+                </div>
+              </button>
+            </div>
+          ))}
         </div>
       )}
-
-      {!loading && threads.map((t) => (
-        <button key={t.partner.id}
-          onClick={() => onNavigate('dm', t.partner.id)}
-          className="w-full text-left border-b border-green-500/20 hover:bg-green-500/[0.03] transition-colors p-4 flex gap-3">
-          <Avatar user={t.partner} size={44} />
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-0.5">
-              <span className="font-bold text-green-300 truncate">{t.partner.displayName}</span>
-              {t.partner.isOwner && <span className="text-[9px] bg-green-400 text-black px-1 font-bold tracking-wider">ROOT</span>}
-              <span className="text-green-500/50 text-xs truncate">@{t.partner.username}</span>
-              <span className="text-green-500/40 text-xs ml-auto whitespace-nowrap">{formatTime(t.lastMessage.createdAt)}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className={`text-sm truncate ${t.unread > 0 ? 'text-green-200 font-bold' : 'text-green-500/70'}`}>
-                {t.lastMessage.isMine && <span className="text-green-500/50">you: </span>}
-                {t.lastMessage.content}
-              </div>
-              {t.unread > 0 && (
-                <span className="bg-green-400 text-black text-[10px] px-1.5 font-bold ml-auto whitespace-nowrap">
-                  {t.unread > 99 ? '99+' : t.unread}
-                </span>
-              )}
-            </div>
-          </div>
-        </button>
-      ))}
-
       {picking && <UserPicker currentUser={currentUser} onPick={(u) => { setPicking(false); onNavigate('dm', u.id); }} onClose={() => setPicking(false)} />}
-    </div>
+    </>
   );
 }
 
-// ============================================================
-// USER PICKER (for starting a new DM)
-// ============================================================
-function UserPicker({ currentUser, onPick, onClose }) {
+function UserPicker({ onPick, onClose }) {
   const [query, setQuery] = useState('');
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -1072,54 +895,36 @@ function UserPicker({ currentUser, onPick, onClose }) {
     const q = query.trim();
     setLoading(true);
     const t = setTimeout(async () => {
-      try {
-        const r = q ? await api.searchUsers(q) : await api.suggestions();
-        setUsers(r.users || []);
-      } catch { setUsers([]); }
+      try { const r = q ? await api.searchUsers(q) : await api.suggestions(); setUsers(r.users || []); }
+      catch { setUsers([]); }
       setLoading(false);
     }, 200);
     return () => clearTimeout(t);
   }, [query]);
 
   return (
-    <div className="fixed inset-0 z-40 bg-black/80 backdrop-blur-sm flex items-start justify-center pt-16 p-4" onClick={onClose}>
-      <div className="bg-zinc-950 border border-green-500/40 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-green-500/30 px-4 py-2">
-          <div className="text-green-400 text-xs tracking-wider">// new_message.sh</div>
-          <button onClick={onClose} className="text-green-500/60 hover:text-red-400"><X size={16} /></button>
-        </div>
-        <div className="border-b border-green-500/30 px-4 py-2 flex items-center gap-2">
-          <Search size={14} className="text-green-500/60" />
-          <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)}
-            placeholder="search users..."
-            className="bg-transparent flex-1 outline-none text-green-300 placeholder:text-green-500/40 text-sm py-1" />
-        </div>
-        <div className="max-h-96 overflow-y-auto">
-          {loading && <div className="p-6 text-center text-green-500/40"><Loader2 className="animate-spin mx-auto" size={16} /></div>}
-          {!loading && users.length === 0 && <div className="p-6 text-center text-green-500/40 text-xs">no users found</div>}
-          {!loading && users.map((u) => (
-            <button key={u.id} onClick={() => onPick(u)}
-              className="w-full text-left p-3 border-b border-green-500/10 hover:bg-green-500/5 flex items-center gap-3">
-              <Avatar user={u} size={32} />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-green-300 text-sm truncate">{u.displayName}</span>
-                  {u.isOwner && <span className="text-[9px] bg-green-400 text-black px-1 font-bold">ROOT</span>}
-                </div>
-                <div className="text-green-500/50 text-xs truncate">@{u.username}</div>
-              </div>
-            </button>
-          ))}
-        </div>
+    <Ueberlagerung titel="New Message" onClose={onClose}>
+      <div style={{ padding: 12 }}>
+        <label className="suchfeld"><Search aria-hidden="true" />
+          <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search people" aria-label="Search people" />
+        </label>
       </div>
-    </div>
+      <div style={{ padding: '0 12px 12px' }}>
+        {loading && <Laedt text="Searching…" />}
+        {!loading && users.length === 0 && <Leer icon={Search} titel="No People Found" text="Try a different name." />}
+        {!loading && users.map((u) => (
+          <button key={u.id} type="button" className="faden" onClick={() => onPick(u)}>
+            <Avatar user={u} size={40} />
+            <div className="rumpf"><div className="oben"><strong>{u.displayName}</strong><Abzeichen user={u} /></div>
+              <div className="vorschau"><span>@{u.username}</span></div></div>
+          </button>
+        ))}
+      </div>
+    </Ueberlagerung>
   );
 }
 
-// ============================================================
-// CONVERSATION VIEW
-// ============================================================
-function ConversationView({ partnerId, currentUser, onNavigate, refreshKey, onRefresh }) {
+function ConversationView({ partnerId, onNavigate, refreshKey, onRefresh }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState('');
@@ -1133,204 +938,118 @@ function ConversationView({ partnerId, currentUser, onNavigate, refreshKey, onRe
     catch { setData({ error: true }); }
     setLoading(false);
   }, [partnerId]);
-
   useEffect(() => { load(); }, [load, refreshKey]);
-
-  // Auto-scroll to bottom when messages update
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [data?.messages?.length]);
+  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [data?.messages?.length]);
 
   const send = async (e) => {
     e?.preventDefault();
     const content = draft.trim();
     if (!content || sending) return;
-    if (content.length > MAX_DM_LEN) { setError(`max ${MAX_DM_LEN} chars`); return; }
+    if (content.length > MAX_DM_LEN) { setError(`Messages can be up to ${MAX_DM_LEN} characters.`); return; }
     setError(''); setSending(true);
-    try {
-      await api.sendMessage(partnerId, content);
-      setDraft(''); load(); onRefresh();
-    } catch (e) { setError(e.message || 'send failed'); }
+    try { await api.sendMessage(partnerId, content); setDraft(''); load(); onRefresh(); }
+    catch (e) { setError(e.message || 'Could not send.'); }
     setSending(false);
   };
 
-  if (loading) return <div className="p-12 text-center text-green-500/40"><Loader2 className="animate-spin mx-auto" /></div>;
-  if (!data || data.error) return (
-    <div>
-      <div className="sticky top-0 bg-black/90 border-b border-green-500/30 px-4 py-3 flex items-center gap-3">
-        <button onClick={() => onNavigate('messages')} className="text-green-500/60"><ArrowLeft size={18} /></button>
-        <div className="text-green-300 text-sm">~/ dm</div>
-      </div>
-      <div className="p-12 text-center text-red-400/60 text-sm">// user not found</div>
-    </div>
-  );
+  if (loading && !data) return <><Kopf titel="Message" onBack={() => onNavigate('messages')} backLabel="Messages" /><Laedt /></>;
+  if (!data || data.error) return <><Kopf titel="Message" onBack={() => onNavigate('messages')} backLabel="Messages" /><Leer icon={User} titel="Person Not Found" /></>;
 
   const { partner, messages } = data;
   return (
-    <div className="flex flex-col h-screen">
-      <div className="sticky top-0 bg-black/90 backdrop-blur z-20 border-b border-green-500/30 px-4 py-3 flex items-center gap-3 shrink-0">
-        <button onClick={() => onNavigate('messages')} className="text-green-500/60 hover:text-green-300"><ArrowLeft size={18} /></button>
-        <Avatar user={partner} size={32} onClick={() => onNavigate('profile', partner.id)} />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
-            <span className="font-bold text-green-300 text-sm truncate cursor-pointer hover:underline"
-              onClick={() => onNavigate('profile', partner.id)}>
-              {partner.displayName}
-            </span>
-            {partner.isOwner && <span className="text-[9px] bg-green-400 text-black px-1 font-bold tracking-wider">ROOT</span>}
-          </div>
-          <div className="text-green-500/50 text-[10px] truncate">@{partner.username}</div>
-        </div>
-        <div className="text-[10px] text-green-500/40 flex items-center gap-1">
-          <Activity size={10} className="text-green-400 animate-pulse" /> live
-        </div>
-      </div>
-
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-2">
-        {messages.length === 0 && (
-          <div className="text-center text-green-500/40 text-xs py-12">
-            <div>// channel established</div>
-            <div>&gt; no messages yet — say hi</div>
-          </div>
-        )}
+    <div className="gespraech">
+      <Kopf titel={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>{partner.displayName}<Abzeichen user={partner} /></span>}
+        unter={`@${partner.username}`} onBack={() => onNavigate('messages')} backLabel="Messages">
+        <Avatar user={partner} size={36} onClick={() => onNavigate('profile', partner.id)} label={`Profile of ${partner.displayName}`} />
+      </Kopf>
+      <div ref={scrollRef} className="verlauf" aria-live="polite">
+        {messages.length === 0 && <Leer icon={MessageCircle} titel="Say Hi" text={`This is the start of your conversation with ${partner.displayName}.`} />}
         {messages.map((m, i) => {
           const prev = messages[i - 1];
           const showAvatar = !m.isMine && (!prev || prev.senderId !== m.senderId);
           const showTime = !prev || (new Date(m.createdAt) - new Date(prev.createdAt)) > 5 * 60 * 1000;
           return (
             <div key={m.id}>
-              {showTime && (
-                <div className="text-center text-green-500/30 text-[10px] py-2">
-                  ─── {new Date(m.createdAt).toLocaleString()} ───
-                </div>
-              )}
-              <div className={`flex gap-2 ${m.isMine ? 'justify-end' : 'justify-start'}`}>
-                {!m.isMine && (
-                  <div className="w-8 shrink-0">
-                    {showAvatar && <Avatar user={partner} size={32} />}
-                  </div>
-                )}
-                <div className={`max-w-[75%] px-3 py-2 text-sm border ${m.isMine
-                  ? 'border-green-400/60 bg-green-400/10 text-green-200'
-                  : 'border-green-500/30 bg-zinc-950 text-green-200/90'}`}>
-                  <div className="whitespace-pre-wrap break-words">{m.content}</div>
-                  <div className={`text-[9px] mt-1 flex items-center gap-1 ${m.isMine ? 'text-green-400/60 justify-end' : 'text-green-500/40'}`}>
-                    <span>{formatTime(m.createdAt)}</span>
-                    {m.isMine && m.readAt && <Check size={10} />}
-                  </div>
+              {showTime && <div className="zeitstempel">{new Date(m.createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</div>}
+              <div className={`blase-zeile${m.isMine ? ' mein' : ''}`}>
+                {!m.isMine && <div className="blase-platz">{showAvatar && <Avatar user={partner} size={32} />}</div>}
+                <div className="blase">
+                  {m.content}
+                  <div className="meta"><time dateTime={m.createdAt}>{formatTime(m.createdAt)}</time>{m.isMine && m.readAt && <><Check aria-hidden="true" /><span className="vh">Read</span></>}</div>
                 </div>
               </div>
             </div>
           );
         })}
       </div>
-
-      <form onSubmit={send} className="border-t border-green-500/30 p-3 flex items-end gap-2 bg-black/80 shrink-0">
-        <textarea value={draft} onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(e); } }}
-          rows={1} maxLength={MAX_DM_LEN}
-          placeholder={`> message @${partner.username}...`}
-          className="flex-1 bg-black/60 border border-green-500/40 focus:border-green-400 outline-none px-3 py-2 text-green-300 placeholder:text-green-500/30 text-sm resize-none" />
-        <button type="submit" disabled={!draft.trim() || sending}
-          className="border border-green-400 text-green-300 hover:bg-green-400 hover:text-black px-3 py-2 text-xs font-bold tracking-wider transition-colors disabled:opacity-30 flex items-center gap-1.5">
-          {sending ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
-          SEND
+      <form onSubmit={send} className="eingabe-leiste">
+        <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={1} maxLength={MAX_DM_LEN} aria-label={`Message to @${partner.username}`}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(e); } }} placeholder="Message" />
+        <button type="submit" className="knopf primaer rund" disabled={!draft.trim() || sending} aria-label="Send">
+          {sending ? <Loader2 size={20} className="dreht" aria-hidden="true" /> : <Send size={20} aria-hidden="true" />}
         </button>
       </form>
-      {error && <div className="text-red-400 text-xs px-3 pb-2 bg-black/80">{error}</div>}
+      {error && <div className="fehler" role="alert" style={{ padding: '0 16px 8px' }}><AlertCircle size={16} aria-hidden="true" />{error}</div>}
     </div>
   );
 }
 
-// ============================================================
-// COMPOSE MODAL
-// ============================================================
+// ============================================================ Verfassen-Blatt
 function ComposeModal({ user, onSubmit, onClose }) {
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-start justify-center pt-16 z-40 p-4" onClick={onClose}>
-      <div className="bg-zinc-950 border border-green-500/40 w-full max-w-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-green-500/30 px-4 py-2">
-          <div className="text-green-400 text-xs tracking-wider">// new_post.sh</div>
-          <button onClick={onClose} className="text-green-500/60 hover:text-red-400"><X size={16} /></button>
-        </div>
-        <Composer user={user} onSubmit={async (data) => { await onSubmit(data); onClose(); }} />
-      </div>
-    </div>
+    <Ueberlagerung titel="New Post" onClose={onClose}>
+      <Composer user={user} autoFocus onSubmit={async (data) => { await onSubmit(data); onClose(); }} />
+    </Ueberlagerung>
   );
 }
 
-// ============================================================
-// RIGHT PANEL
-// ============================================================
-function RightPanel({ currentUser, onNavigate, refreshKey, onRefresh }) {
+// ============================================================ Rechte Spalte
+function RightPanel({ onNavigate, refreshKey, onRefresh }) {
   const [suggestions, setSuggestions] = useState([]);
-  const [latency, setLatency] = useState(0);
+  const [latency, setLatency] = useState(null);
+  const [online, setOnline] = useState(true);
+  const [suche, setSuche] = useState('');
 
   useEffect(() => {
     api.suggestions().then((r) => setSuggestions(r.users || [])).catch(() => {});
-    const start = Date.now();
-    fetch('/api/health').then(() => setLatency(Date.now() - start)).catch(() => {});
+    const start = performance.now();
+    fetch('/api/health').then((r) => { setOnline(r.ok); setLatency(Math.round(performance.now() - start)); }).catch(() => setOnline(false));
   }, [refreshKey]);
 
   return (
-    <aside className="w-72 shrink-0 p-4 hidden lg:block sticky top-0 h-screen overflow-y-auto">
-      <div className="border border-green-500/30 bg-zinc-950/60 mb-4">
-        <div className="border-b border-green-500/20 px-3 py-2 text-xs text-green-400 tracking-wider flex items-center justify-between">
-          <span>// system_status</span><Cpu size={12} />
-        </div>
-        <div className="p-3 space-y-1.5 text-[11px] text-green-500/70">
-          <div className="flex justify-between"><span>uplink</span><span className="text-green-300 flex items-center gap-1"><Wifi size={10} /> stable</span></div>
-          <div className="flex justify-between"><span>api_latency</span><span className="text-green-300">{latency}ms</span></div>
-          <div className="flex justify-between"><span>mode</span><span className="text-green-300">live (SSE)</span></div>
-        </div>
-      </div>
+    <aside className="rechts" aria-label="Sidebar">
+      <form onSubmit={(e) => { e.preventDefault(); onNavigate('explore', { suche }); }}>
+        <label className="suchfeld"><Search aria-hidden="true" />
+          <input type="search" value={suche} onChange={(e) => setSuche(e.target.value)} placeholder="Search Nexus" aria-label="Search Nexus" enterKeyHint="search" />
+        </label>
+      </form>
       {suggestions.length > 0 && (
-        <div className="border border-green-500/30 bg-zinc-950/60">
-          <div className="border-b border-green-500/20 px-3 py-2 text-xs text-green-400 tracking-wider">// suggested_nodes</div>
-          <div className="divide-y divide-green-500/10">
-            {suggestions.map((u) => (
-              <div key={u.id} className="p-3 flex items-center gap-2">
-                <Avatar user={u} size={32} onClick={() => onNavigate('profile', u.id)} />
-                <div className="flex-1 min-w-0">
-                  <div onClick={() => onNavigate('profile', u.id)} className="text-green-300 text-xs truncate hover:underline cursor-pointer flex items-center gap-1">
-                    {u.displayName}
-                    {u.isOwner && <span className="text-[8px] bg-green-400 text-black px-1 font-bold">ROOT</span>}
-                  </div>
-                  <div className="text-green-500/50 text-[10px] truncate">@{u.username}</div>
-                </div>
-                <button onClick={async () => { await api.follow(u.id); onRefresh(); }}
-                  className="border border-green-400 text-green-300 hover:bg-green-400 hover:text-black px-2 py-1 text-[10px] font-bold tracking-wider transition-colors">
-                  +FOLLOW
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
+        <section className="karte" aria-labelledby="vorschlaege">
+          <h3 id="vorschlaege">Who to Follow</h3>
+          {suggestions.map((u) => (
+            <div key={u.id} className="person">
+              <Avatar user={u} size={40} onClick={() => onNavigate('profile', u.id)} />
+              <button type="button" className="wer" onClick={() => onNavigate('profile', u.id)}>
+                <strong>{u.displayName} <Abzeichen user={u} /></strong><span>@{u.username}</span>
+              </button>
+              <button type="button" className="knopf primaer klein" onClick={async () => { await api.follow(u.id); onRefresh(); }}>Follow</button>
+            </div>
+          ))}
+        </section>
       )}
-      <div className="text-[9px] text-green-500/30 mt-4 tracking-wider text-center">
-        [ nexus · multi-container · v2.5 ]
-      </div>
+      <section className="karte" aria-labelledby="status-titel">
+        <h3 id="status-titel">Status</h3>
+        <div className="status-zeile"><span>Connection</span><span style={{ color: online ? 'var(--gut)' : 'var(--schlecht)' }}>{online ? 'Online' : 'Offline'}</span></div>
+        <div className="status-zeile"><span>Response Time</span><span>{latency == null ? '–' : `${latency} ms`}</span></div>
+        <div className="status-zeile"><span>Updates</span><span>Live</span></div>
+      </section>
+      <p className="fuss-info">nexus · by <a href="https://slxt.org" target="_blank" rel="noopener noreferrer">slxt.org</a></p>
     </aside>
   );
 }
 
-function Background() {
-  return (
-    <>
-      <div className="fixed inset-0 pointer-events-none scanlines" />
-      <div className="fixed inset-0 pointer-events-none"
-        style={{ background: 'radial-gradient(circle at 50% 50%, transparent 0%, rgba(0,0,0,0.4) 100%)' }} />
-    </>
-  );
-}
-
-// ============================================================
-// MAIN APP
-// ============================================================
+// ============================================================ App
 export default function App() {
-  const [booted, setBooted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState(null);
   const [view, setView] = useState({ name: 'feed', payload: null });
@@ -1339,7 +1058,6 @@ export default function App() {
   const [unreadDMs, setUnreadDMs] = useState(0);
   const [lightboxSrc, setLightboxSrc] = useState(null);
 
-  // Restore session
   useEffect(() => {
     (async () => {
       if (!auth.getToken()) { setLoading(false); return; }
@@ -1349,87 +1067,76 @@ export default function App() {
     })();
   }, []);
 
-  // Load unread count and refresh on changes
   const refreshUnread = useCallback(async () => {
     if (!currentUser) return;
-    try { const r = await api.unreadCount(); setUnreadDMs(r.count || 0); }
-    catch {}
+    try { const r = await api.unreadCount(); setUnreadDMs(r.count || 0); } catch {}
   }, [currentUser]);
-
   useEffect(() => { refreshUnread(); }, [refreshUnread, refreshKey]);
 
-  // SSE handlers
   useEffect(() => {
     if (!currentUser) return;
     const off = connectEvents({
-      'post:new':     () => setRefreshKey((k) => k + 1),
+      'post:new': () => setRefreshKey((k) => k + 1),
       'post:deleted': () => setRefreshKey((k) => k + 1),
-      'dm:new':       (msg) => {
+      'dm:new': (msg) => {
         setRefreshKey((k) => k + 1);
-        // only bump unread when not currently viewing this conversation
-        if (!(view.name === 'dm' && view.payload === msg.senderId)) {
-          setUnreadDMs((n) => n + 1);
-        }
+        if (!(view.name === 'dm' && view.payload === msg.senderId)) setUnreadDMs((n) => n + 1);
       },
-      'dm:sent':      () => setRefreshKey((k) => k + 1),
-      'dm:read':      () => setRefreshKey((k) => k + 1),
+      'dm:sent': () => setRefreshKey((k) => k + 1),
+      'dm:read': () => setRefreshKey((k) => k + 1),
     });
     return off;
   }, [currentUser, view.name, view.payload]);
+
+  // Ungelesene im Tab-Titel (wie Mail/Messages)
+  useEffect(() => { document.title = unreadDMs > 0 ? `(${unreadDMs}) Nexus` : 'Nexus'; }, [unreadDMs]);
 
   const onAuthenticated = (user) => { setCurrentUser(user); setView({ name: 'feed', payload: null }); };
   const onLogout = () => { auth.clear(); setCurrentUser(null); setView({ name: 'feed', payload: null }); };
   const navigate = (name, payload = null) => {
     setView({ name, payload });
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    // When entering a DM, clear unread immediately (will refresh on next refreshUnread)
+    window.scrollTo({ top: 0, behavior: ruhig() ? 'auto' : 'smooth' });
     if (name === 'dm') setUnreadDMs(0);
   };
   const handleHashtag = (tag) => navigate('hashtag', tag);
   const triggerRefresh = () => setRefreshKey((k) => k + 1);
+  const oeffneVerfassen = () => setComposeOpen(true);
 
-  if (!booted) return <BootScreen onDone={() => setBooted(true)} />;
-  if (loading) return <div className="min-h-screen bg-black flex items-center justify-center font-mono"><Loader2 className="animate-spin text-green-400" size={32} /></div>;
-  if (!currentUser) return <><Background /><AuthScreen onAuthenticated={onAuthenticated} /></>;
+  if (loading) return <><Himmel /><Laedt text="" /></>;
+  if (!currentUser) return <><Himmel /><AuthScreen onAuthenticated={onAuthenticated} /></>;
 
+  const shared = { currentUser, onNavigate: navigate, onHashtag: handleHashtag, onLightbox: setLightboxSrc, refreshKey, onRefresh: triggerRefresh, onCompose: oeffneVerfassen };
   let content;
-  const sharedProps = {
-    currentUser, onNavigate: navigate, onHashtag: handleHashtag,
-    onLightbox: setLightboxSrc, refreshKey, onRefresh: triggerRefresh,
-  };
-
-  if (view.name === 'feed') content = <FeedView {...sharedProps} />;
-  else if (view.name === 'explore') content = <ExploreView {...sharedProps} />;
-  else if (view.name === 'hashtag') content = <ExploreView {...sharedProps} hashtag={view.payload} />;
-  else if (view.name === 'profile') content = <ProfileView {...sharedProps} userId={view.payload} />;
-  else if (view.name === 'post') content = <PostDetailView {...sharedProps} postId={view.payload} />;
-  else if (view.name === 'settings') content = <SettingsView currentUser={currentUser} onNavigate={navigate} onUserUpdated={setCurrentUser} />;
+  if (view.name === 'feed') content = <FeedView {...shared} />;
+  else if (view.name === 'explore') content = <ExploreView {...shared} initialQuery={view.payload?.suche || ''} />;
+  else if (view.name === 'hashtag') content = <ExploreView {...shared} hashtag={view.payload} />;
+  else if (view.name === 'profile') content = <ProfileView key={view.payload} {...shared} userId={view.payload} />;
+  else if (view.name === 'post') content = <PostDetailView key={view.payload} {...shared} postId={view.payload} />;
+  else if (view.name === 'settings') content = <SettingsView currentUser={currentUser} onNavigate={navigate} onUserUpdated={setCurrentUser} onLogout={onLogout} />;
   else if (view.name === 'messages') content = <MessagesView currentUser={currentUser} onNavigate={navigate} refreshKey={refreshKey} />;
-  else if (view.name === 'dm') content = <ConversationView partnerId={view.payload} currentUser={currentUser} onNavigate={navigate} refreshKey={refreshKey} onRefresh={triggerRefresh} />;
+  else if (view.name === 'dm') content = <ConversationView key={view.payload} partnerId={view.payload} onNavigate={navigate} refreshKey={refreshKey} onRefresh={triggerRefresh} />;
 
   const navView = view.name === 'hashtag' ? 'explore'
     : view.name === 'post' ? 'feed'
     : view.name === 'dm' ? 'messages'
+    : view.name === 'profile' && view.payload !== currentUser.id ? 'feed'
     : view.name;
 
   return (
     <>
-      <Background />
-      <div className="min-h-screen bg-transparent text-green-300 font-mono flex">
-        <Sidebar currentUser={currentUser} currentView={navView}
-          onNavigate={navigate} onLogout={onLogout} onCompose={() => setComposeOpen(true)} unreadDMs={unreadDMs} />
-        <main className="flex-1 max-w-2xl border-r border-green-500/20 min-h-screen pb-20 md:pb-0">
-          {content}
-        </main>
-        <RightPanel currentUser={currentUser} onNavigate={navigate} refreshKey={refreshKey} onRefresh={triggerRefresh} />
-        <MobileNav currentView={navView} onNavigate={navigate} currentUser={currentUser}
-          onCompose={() => setComposeOpen(true)} unreadDMs={unreadDMs} />
-        {composeOpen && (
-          <ComposeModal user={currentUser} onClose={() => setComposeOpen(false)}
-            onSubmit={async ({ content, imageUrl }) => { await api.createPost({ content, imageUrl }); triggerRefresh(); }} />
-        )}
-        {lightboxSrc && <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
+      <a className="springen" href="#inhalt">Skip to content</a>
+      <Himmel />
+      <div className="app">
+        <Sidebar currentUser={currentUser} currentView={navView} onNavigate={navigate} onLogout={onLogout} onCompose={oeffneVerfassen} unreadDMs={unreadDMs} />
+        <main className="haupt" id="inhalt">{content}</main>
+        <RightPanel onNavigate={navigate} refreshKey={refreshKey} onRefresh={triggerRefresh} />
       </div>
+      <TabLeiste currentView={navView} onNavigate={navigate} currentUser={currentUser} unreadDMs={unreadDMs} />
+      {composeOpen && (
+        <ComposeModal user={currentUser} onClose={() => setComposeOpen(false)}
+          onSubmit={async ({ content, imageUrl }) => { await api.createPost({ content, imageUrl }); triggerRefresh(); }} />
+      )}
+      {lightboxSrc && <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
     </>
   );
 }
