@@ -2,7 +2,7 @@
 
 Ein Twitter-artiges Netzwerk, komplett dockerisiert. Oberfläche im Stil der slxt-Seiten nach Apple HIG:
 Himmel-Verlauf, Sternenhimmel im dunklen Modus, Glas-Karten, Systemschrift (keine Web-Fonts, kein CDN),
-**hell/dunkel umschaltbar** (Standard hell; Seitenleiste, Einstellungen → Appearance, Anmeldeseite).
+**hell/dunkel umschaltbar** (Standard dunkel; Seitenleiste, Einstellungen → Appearance, Anmeldeseite).
 
 ```
 ┌──────────┐   ┌─────────┐   ┌──────────┐

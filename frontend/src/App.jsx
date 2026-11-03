@@ -108,7 +108,7 @@ function PostContent({ content, onHashtag }) {
 
 // Hell/Dunkel (public/modus.js, Standard hell; Wahl bleibt im Browser)
 function useModus() {
-  const [modus, setModus] = useState(() => window.slxtModus?.get() || 'hell');
+  const [modus, setModus] = useState(() => window.slxtModus?.get() || 'dunkel');
   useEffect(() => {
     const f = (e) => setModus(e.detail);
     window.addEventListener('modus', f);
@@ -834,7 +834,7 @@ function SettingsView({ currentUser, onNavigate, onUserUpdated, onLogout }) {
         </div>
         <div className="feld"><span>Appearance</span>
           <Segmente label="Appearance" werte={[['hell', 'Light'], ['dunkel', 'Dark']]} wert={modus} onChange={setModus} />
-          <small>Saved in this browser. Light is the default.</small>
+          <small>Saved in this browser. Dark is the default.</small>
         </div>
         <label className="feld"><span>Display Name</span>
           <input className="eingabe" disabled={gesperrt} value={displayName} onChange={(e) => setDisplayName(e.target.value)} maxLength={30} />
