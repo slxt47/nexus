@@ -34,10 +34,9 @@
   --kurz: .15s; --mittel: .3s;
   --federnd: cubic-bezier(.3, 1.3, .4, 1);
   --weich: cubic-bezier(.2, .8, .2, 1);
-  color-scheme: light dark;
+  color-scheme: light;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
+:root[data-modus="dunkel"] { color-scheme: dark;
     --himmel-1: #04050d; --himmel-2: #0b0e2a; --himmel-3: #1a1240;
     --grund: #0b0e2a;
     --flaeche: rgba(22, 22, 42, .68); --flaeche-fest: #17172a;
@@ -52,7 +51,6 @@
     --schatten-hoch: 0 0 0 1px rgba(255, 255, 255, .09), 0 24px 60px rgba(0, 0, 0, .55);
     --sterne: 1; --meteor: 190, 215, 255;
   }
-}
 @media (prefers-contrast: more) {
   :root { --text-2: var(--text); --linie: currentColor; --flaeche: var(--flaeche-fest); --leiste: var(--grund); }
 }
@@ -387,3 +385,7 @@ textarea.eingabe { resize: vertical; min-height: 96px; line-height: 1.4; }
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
   .bild:hover img { transform: none; }
 }
+
+/* Hell/Dunkel-Schalter auf der Anmeldeseite (oben rechts, schwebend) */
+.modus-fest { position: fixed; top: calc(16px + env(safe-area-inset-top)); right: calc(16px + env(safe-area-inset-right)); z-index: 5;
+  background: var(--flaeche); box-shadow: var(--schatten); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); }

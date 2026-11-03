@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Home, Hash, MessageCircle, User, Settings, SquarePen, ChevronLeft, Heart, Repeat2, Trash2,
   Image as ImageIcon, X, Check, Loader2, AlertCircle, BadgeCheck, LogOut, UserPlus, Search,
-  Send, Inbox, TrendingUp, Sparkles, MailCheck,
+  Send, Inbox, TrendingUp, Sparkles, MailCheck, Sun, Moon,
 } from 'lucide-react';
 import { api, auth, connectEvents, compressImage } from './api.js';
 
@@ -103,6 +103,28 @@ function PostContent({ content, onHashtag }) {
         return <span key={i}>{p}</span>;
       })}
     </>
+  );
+}
+
+// Hell/Dunkel (public/modus.js, Standard hell; Wahl bleibt im Browser)
+function useModus() {
+  const [modus, setModus] = useState(() => window.slxtModus?.get() || 'hell');
+  useEffect(() => {
+    const f = (e) => setModus(e.detail);
+    window.addEventListener('modus', f);
+    return () => window.removeEventListener('modus', f);
+  }, []);
+  return [modus, (m) => window.slxtModus?.setzen(m)];
+}
+
+function ModusKnopf({ className = 'knopf rund ohne' }) {
+  const [modus, setzen] = useModus();
+  const dunkel = modus === 'dunkel';
+  const text = dunkel ? 'Switch to light mode' : 'Switch to dark mode';
+  return (
+    <button type="button" className={className} onClick={() => setzen(dunkel ? 'hell' : 'dunkel')} aria-label={text} title={text}>
+      {dunkel ? <Sun size={20} aria-hidden="true" /> : <Moon size={20} aria-hidden="true" />}
+    </button>
   );
 }
 
@@ -260,6 +282,7 @@ function AuthScreen({ onAuthenticated }) {
 
   return (
     <main className="anmeldung">
+      <ModusKnopf className="knopf rund modus-fest" />
       <div className="karte">
         <img className="logo" src="/logo.svg" alt="" width="72" height="72" />
         <h1>nexus<span className="punkt">.</span></h1>
@@ -499,6 +522,7 @@ function Sidebar({ currentUser, currentView, onNavigate, onLogout, onCompose, un
       <div className="konto">
         <Avatar user={currentUser} size={40} />
         <div className="wer"><strong>{currentUser.displayName}</strong><span>@{currentUser.username}</span></div>
+        <ModusKnopf />
         <button type="button" className="knopf rund ohne" onClick={onLogout} aria-label="Log out" title="Log out"><LogOut size={20} aria-hidden="true" /></button>
       </div>
     </aside>
@@ -779,6 +803,7 @@ function SettingsView({ currentUser, onNavigate, onUserUpdated, onLogout }) {
   const [error, setError] = useState('');
   const fileRef = useRef(null);
   const gesperrt = currentUser.isOwner;
+  const [modus, setModus] = useModus();
 
   const handleAvatar = async (e) => {
     const f = e.target.files?.[0];
@@ -806,6 +831,10 @@ function SettingsView({ currentUser, onNavigate, onUserUpdated, onLogout }) {
           <Avatar user={{ ...currentUser, avatar }} size={80} />
           <button type="button" className="knopf" disabled={gesperrt} onClick={() => fileRef.current?.click()}><ImageIcon size={18} aria-hidden="true" />Change Photo</button>
           <input ref={fileRef} type="file" accept="image/*" onChange={handleAvatar} hidden />
+        </div>
+        <div className="feld"><span>Appearance</span>
+          <Segmente label="Appearance" werte={[['hell', 'Light'], ['dunkel', 'Dark']]} wert={modus} onChange={setModus} />
+          <small>Saved in this browser. Light is the default.</small>
         </div>
         <label className="feld"><span>Display Name</span>
           <input className="eingabe" disabled={gesperrt} value={displayName} onChange={(e) => setDisplayName(e.target.value)} maxLength={30} />
