@@ -114,7 +114,12 @@ function useModus() {
     window.addEventListener('modus', f);
     return () => window.removeEventListener('modus', f);
   }, []);
-  return [modus, (m) => window.slxtModus?.setzen(m)];
+  // Wechsel wie auf allen slxt-Seiten: langsam überblenden (modus.js → slxtModus.sanft), sonst direkt
+  return [modus, (m) => {
+    const s = window.slxtModus;
+    if (!s || m === s.get()) return;
+    if (s.sanft) s.sanft(); else s.setzen(m);
+  }];
 }
 
 function ModusKnopf({ className = 'knopf rund ohne' }) {
