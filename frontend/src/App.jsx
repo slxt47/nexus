@@ -1,5 +1,6 @@
 // Nexus – Oberfläche im Stil von dash.slxt.dev / slxt.org (Apple HIG). Logik und API unverändert.
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { flushSync } from 'react-dom';
 import {
   Home, Hash, MessageCircle, User, Settings, SquarePen, ChevronLeft, Heart, Repeat2, Trash2,
   Image as ImageIcon, X, Check, Loader2, AlertCircle, BadgeCheck, LogOut, UserPlus, Search,
@@ -110,7 +111,8 @@ function PostContent({ content, onHashtag }) {
 function useModus() {
   const [modus, setModus] = useState(() => window.slxtModus?.get() || 'dunkel');
   useEffect(() => {
-    const f = (e) => setModus(e.detail);
+    // flushSync: sofort neu zeichnen, damit die Momentaufnahme fürs Überblenden schon das neue Symbol zeigt
+    const f = (e) => flushSync(() => setModus(e.detail));
     window.addEventListener('modus', f);
     return () => window.removeEventListener('modus', f);
   }, []);
