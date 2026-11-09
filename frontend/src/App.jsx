@@ -135,6 +135,21 @@ function ModusKnopf({ className = 'knopf rund ohne' }) {
   );
 }
 
+// Rechtliches (zentral auf slxt.org, deutsch)
+const RECHT = [
+  ['Imprint', 'https://slxt.org/impressum/'],
+  ['Privacy', 'https://slxt.org/datenschutz/#nexus'],
+  ['Terms', 'https://slxt.org/nutzungsbedingungen/'],
+];
+function RechtLinks({ className = 'recht-links' }) {
+  return (
+    <nav className={className} aria-label="Legal">
+      {RECHT.map(([t, h]) => <a key={t} href={h} target="_blank" rel="noopener noreferrer">{t}</a>)}
+      <span className="leise">(in German)</span>
+    </nav>
+  );
+}
+
 function Laedt({ text = 'Loading…' }) {
   return <div className="laedt" role="status"><Loader2 size={20} className="dreht" aria-hidden="true" />{text}</div>;
 }
@@ -349,9 +364,12 @@ function AuthScreen({ onAuthenticated }) {
             <button type="submit" disabled={busy} className="knopf primaer gross">
               {busy ? <Loader2 size={18} className="dreht" aria-hidden="true" /> : null}{busy ? 'Creating…' : 'Join Nexus'}
             </button>
+            <small className="leise zustimmung">By joining you accept the <a href="https://slxt.org/nutzungsbedingungen/" target="_blank" rel="noopener noreferrer">Terms of Use</a> and
+              confirm you are at least 14. How your data is used: <a href="https://slxt.org/datenschutz/#nexus" target="_blank" rel="noopener noreferrer">Privacy Policy</a> (both in German).</small>
             <Fehler />
           </form>
         )}
+        <RechtLinks />
       </div>
     </main>
   );
@@ -862,6 +880,8 @@ function SettingsView({ currentUser, onNavigate, onUserUpdated, onLogout }) {
           <button type="button" className="knopf gefahr nur-schmal" onClick={onLogout}><LogOut size={18} aria-hidden="true" />Log Out</button>
         </div>
         {error && <div className="fehler" role="alert"><AlertCircle size={16} aria-hidden="true" />{error}</div>}
+        <RechtLinks />
+        <small className="leise">To delete your account, email office@slxt.org from your registered address.</small>
       </div>
     </>
   );
@@ -1080,6 +1100,7 @@ function RightPanel({ onNavigate, refreshKey, onRefresh }) {
         <div className="status-zeile"><span>Updates</span><span>Live</span></div>
       </section>
       <p className="fuss-info">nexus · by <a href="https://slxt.org" target="_blank" rel="noopener noreferrer">slxt.org</a></p>
+      <RechtLinks />
     </aside>
   );
 }

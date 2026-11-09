@@ -389,3 +389,14 @@ textarea.eingabe { resize: vertical; min-height: 96px; line-height: 1.4; }
 /* Hell/Dunkel-Schalter auf der Anmeldeseite (oben rechts, schwebend) */
 .modus-fest { position: fixed; top: calc(16px + env(safe-area-inset-top)); right: calc(16px + env(safe-area-inset-right)); z-index: 5;
   background: var(--flaeche); box-shadow: var(--schatten); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); }
+
+/* Rechtliches: kleine Pillen-Links (Impressum, Datenschutz, Nutzungsbedingungen auf slxt.org) */
+.recht-links { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 14px; }
+.recht-links a {
+  display: inline-flex; align-items: center; min-height: 28px; padding: 0 11px; border-radius: 999px;
+  border: 1px solid var(--linie, rgba(127, 127, 127, .25)); color: var(--text); font-size: .8125rem; font-weight: 500; text-decoration: none;
+}
+.recht-links a:hover { background: color-mix(in srgb, var(--akzent, #6d4aff) 14%, transparent); }
+.recht-links .leise { font-size: .75rem; }
+.zustimmung { display: block; margin-top: 10px; line-height: 1.45; }
+.zustimmung a { color: inherit; text-decoration: underline; }
