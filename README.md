@@ -1,6 +1,8 @@
 # NEXUS — Microblogging Multi-Container Stack
 
-Ein Twitter-artiges Netzwerk im CRT-Terminal-Look, komplett dockerisiert.
+Ein Twitter-artiges Netzwerk, komplett dockerisiert. Oberfläche im Stil der slxt-Seiten nach Apple HIG:
+Himmel-Verlauf, Sternenhimmel im dunklen Modus, Glas-Karten, Systemschrift (keine Web-Fonts, kein CDN),
+**hell/dunkel umschaltbar** (Standard dunkel; Seitenleiste, Einstellungen → Appearance, Anmeldeseite).
 
 ```
 ┌──────────┐   ┌─────────┐   ┌──────────┐
@@ -150,6 +152,13 @@ OWNER_DISPLAY_NAME=THE_ARCHITECT
 Dann `docker compose down -v && docker compose up -d --build` (das `-v` löscht das DB-Volume, damit der Owner neu gesetzt wird).
 
 ---
+
+## Frontend
+
+- React 18 + Vite, Icons von Lucide; eigenes Design-System in `frontend/src/index.css` (kein Tailwind mehr).
+- `frontend/public/modus.js` setzt den Modus vor dem ersten Zeichnen (`localStorage` „modus“), dunkle Farben stehen in `:root[data-modus="dunkel"]`.
+- Dialoge als eigene Überlagerung statt `<dialog>` (Safari/WebKit lässt Animationen im Top-Layer hängen).
+- Am Handy Tab-Leiste unten, am Desktop Seitenleiste.
 
 `// nexus_terminal · multi-container build · v1.0`
 
