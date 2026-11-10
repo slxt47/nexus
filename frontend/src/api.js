@@ -1,23 +1,19 @@
 // API client for NEXUS backend.
 const BASE = import.meta.env.VITE_API_BASE || '/api';
-const TOKEN_KEY = 'nexus_token';
-
-export const auth = {
-  getToken: () => localStorage.getItem(TOKEN_KEY),
-  setToken: (t) => localStorage.setItem(TOKEN_KEY, t),
-  clear: () => localStorage.removeItem(TOKEN_KEY),
-};
+// Anmeldung über ein httpOnly-Cookie (Sitzung liegt auf dem Server, nichts im localStorage).
+// Jede schreibende Anfrage schickt den Kopf X-Nexus: 1 (CSRF-Schutz zusätzlich zu SameSite=Strict).
+export class NichtAngemeldet extends Error {}
 
 async function request(path, opts = {}) {
-  const token = auth.getToken();
-  const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  const res = await fetch(`${BASE}${path}`, { ...opts, headers });
+  const headers = { 'Content-Type': 'application/json', 'X-Nexus': '1', ...(opts.headers || {}) };
+  const res = await fetch(`${BASE}${path}`, { ...opts, headers, credentials: 'same-origin' });
   let body = null;
   try { body = await res.json(); } catch {}
   if (!res.ok) {
-    const err = new Error(body?.error || `HTTP ${res.status}`);
+    const err = res.status === 401 && !path.startsWith('/auth/') && !path.startsWith('/account/delete') && path !== '/account'
+      ? new NichtAngemeldet(body?.error || 'not signed in') : new Error(body?.error || `HTTP ${res.status}`);
     err.status = res.status;
+    if (err instanceof NichtAngemeldet) window.dispatchEvent(new Event('nexus:abgemeldet'));
     throw err;
   }
   return body;
@@ -27,11 +23,26 @@ export const api = {
   // Auth
   requestCode: (email) => request('/auth/request-code', { method: 'POST', body: JSON.stringify({ email }) }),
   verifyCode: (email, code) => request('/auth/verify-code', { method: 'POST', body: JSON.stringify({ email, code }) }),
-  register: (regToken, username, displayName, avatar) =>
-    request('/auth/register', { method: 'POST', body: JSON.stringify({ regToken, username, displayName, avatar }) }),
+  register: (regToken, username, displayName, avatar, acceptTerms) =>
+    request('/auth/register', { method: 'POST', body: JSON.stringify({ regToken, username, displayName, avatar, acceptTerms }) }),
+  logout: () => request('/auth/logout', { method: 'POST' }),
+
+  // Konto: Geräte, Export, Löschen
+  sessions: () => request('/account/sessions'),
+  endSession: (id) => request(`/account/sessions/${id}`, { method: 'DELETE' }),
+  endOtherSessions: () => request('/account/sessions/end-others', { method: 'POST' }),
+  exportData: async () => {
+    const res = await fetch(`${BASE}/account/export`, { credentials: 'same-origin' });
+    if (!res.ok) { let b = null; try { b = await res.json(); } catch {} throw new Error(b?.error || `HTTP ${res.status}`); }
+    const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '')?.[1] || 'nexus-export.json';
+    return { blob: await res.blob(), name };
+  },
+  requestDeleteCode: () => request('/account/delete/request-code', { method: 'POST' }),
+  deleteAccount: (code) => request('/account', { method: 'DELETE', body: JSON.stringify({ code }) }),
 
   // Me
   me: () => request('/me'),
+  session: () => request('/auth/session'),
   updateMe: (patch) => request('/me', { method: 'PATCH', body: JSON.stringify(patch) }),
 
   // Users
@@ -71,9 +82,8 @@ export const api = {
 
 // Server-Sent Events
 export function connectEvents(handlers) {
-  const token = auth.getToken();
-  if (!token) return () => {};
-  const es = new EventSource(`${BASE}/events?token=${encodeURIComponent(token)}`);
+  // Cookie geht automatisch mit (gleiche Herkunft) – kein Token mehr in der Adresse
+  const es = new EventSource(`${BASE}/events`);
   const wire = (name) => {
     if (!handlers[name]) return;
     es.addEventListener(name, (e) => {

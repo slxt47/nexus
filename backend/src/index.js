@@ -2,10 +2,9 @@
 // NEXUS Backend — Express API
 // ============================================================
 const express = require('express');
-const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
-const { randomUUID } = require('crypto');
+const { randomUUID, randomInt, randomBytes, createHash, timingSafeEqual } = require('crypto');
 const { Pool } = require('pg');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
@@ -19,7 +18,10 @@ const {
   OWNER_EMAIL, OWNER_USERNAME, OWNER_DISPLAY_NAME,
   MAX_POST_LEN = 280,
   UPLOAD_DIR = '/uploads',
+  COOKIE_SECURE = 'true',          // nur für lokale Tests über http auf false
 } = process.env;
+const SID = 'nx_sid';
+const SITZUNG_TAGE = 30;           // Sitzung endet nach 30 Tagen ohne Aktivität
 
 if (!DATABASE_URL || !JWT_SECRET) {
   console.error('FATAL: DATABASE_URL and JWT_SECRET are required');
@@ -64,15 +66,18 @@ mailer.verify().then(
   (err) => console.warn('[mail] SMTP verify failed:', err.message)
 );
 
-async function sendCode(email, code) {
+async function sendCode(email, code, zweck = 'login') {
+  const loeschen = zweck === 'delete';
   await mailer.sendMail({
     from: SMTP_FROM, to: email,
-    subject: `[NEXUS] Your access code: ${code}`,
-    text: `Your verification code is: ${code}\n\nValid for 10 minutes.\n\n// NEXUS terminal`,
+    subject: loeschen ? `[NEXUS] Confirm account deletion: ${code}` : `[NEXUS] Your access code: ${code}`,
+    text: (loeschen
+      ? `Someone (hopefully you) asked to DELETE your Nexus account.\nCode: ${code}\n\nValid for 10 minutes. If this wasn't you, ignore this mail and sign out other devices in Settings → Security.`
+      : `Your verification code is: ${code}\n\nValid for 10 minutes. If you didn't ask for it, just ignore this mail.`) + `\n\n// NEXUS`,
     html: `
       <div style="font-family:monospace;background:#000;color:#4ade80;padding:24px;border:1px solid #4ade80">
         <div style="opacity:.6;font-size:11px">// NEXUS terminal v2.4</div>
-        <h2 style="color:#4ade80;letter-spacing:.3em">ACCESS CODE</h2>
+        <h2 style="color:#4ade80;letter-spacing:.3em">${loeschen ? 'DELETE ACCOUNT' : 'ACCESS CODE'}</h2>
         <div style="font-size:32px;letter-spacing:.5em;font-weight:bold;margin:16px 0">${code}</div>
         <div style="opacity:.6;font-size:11px">Valid for 10 minutes.</div>
       </div>`,
@@ -85,7 +90,52 @@ async function sendCode(email, code) {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const USERNAME_RE = /^[a-z0-9_]{2,20}$/;
 const HASHTAG_RE = /#([\w\u00C0-\u017F]+)/g;
-const sixDigit = () => Math.floor(100000 + Math.random() * 900000).toString();
+const sixDigit = () => String(randomInt(100000, 1000000));     // kryptografisch zufällig
+const sha256 = (s) => createHash('sha256').update(s).digest('hex');
+function gleich(a, b) {
+  const x = Buffer.from(String(a)), y = Buffer.from(String(b));
+  return x.length === y.length && timingSafeEqual(x, y);
+}
+// Echte Besucher-IP nur für die Drossel (nie gespeichert): Cloudflare → nginx → hier
+function clientIp(req) {
+  return String(req.headers['cf-connecting-ip'] || req.headers['x-real-ip'] || req.socket.remoteAddress || '-').slice(0, 64);
+}
+// Einfache Drossel im Speicher: max Treffer je Schlüssel im Zeitfenster
+const drossel = new Map();
+function gedrosselt(key, max, ms) {
+  const jetzt = Date.now();
+  const hits = (drossel.get(key) || []).filter((t) => jetzt - t < ms);
+  hits.push(jetzt); drossel.set(key, hits);
+  if (drossel.size > 20000) for (const [k, v] of drossel) if (v.every((t) => jetzt - t > 3600_000)) drossel.delete(k);
+  return hits.length > max;
+}
+function bremse(res) { return res.status(429).json({ error: 'Too many attempts – please wait a few minutes.' }); }
+// Gerät grob aus dem User-Agent (keine IP): „Safari · iPhone“
+function geraet(ua = '') {
+  const b = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'Browser';
+  const o = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android' : /Mac OS X/.test(ua) ? 'Mac'
+    : /Windows/.test(ua) ? 'Windows' : /Linux/.test(ua) ? 'Linux' : '';
+  return o ? `${b} · ${o}` : b;
+}
+function cookieWert(req, name) {
+  for (const teil of String(req.headers.cookie || '').split(';')) {
+    const i = teil.indexOf('=');
+    if (i > 0 && teil.slice(0, i).trim() === name) return decodeURIComponent(teil.slice(i + 1).trim());
+  }
+  return null;
+}
+function cookieSetzen(res, wert, maxAge) {
+  const teile = [`${SID}=${wert}`, 'Path=/', 'HttpOnly', 'SameSite=Strict', `Max-Age=${maxAge}`];
+  if (String(COOKIE_SECURE) !== 'false') teile.push('Secure');
+  res.setHeader('Set-Cookie', teile.join('; '));
+}
+async function sitzungAnlegen(req, res, userId) {
+  const token = randomBytes(32).toString('base64url');
+  const s = await q1(`INSERT INTO sessions (user_id, token_hash, device) VALUES ($1,$2,$3) RETURNING id`,
+    [userId, sha256(token), geraet(req.headers['user-agent'])]);
+  cookieSetzen(res, token, SITZUNG_TAGE * 86400);
+  return s.id;
+}
 
 function extractHashtags(text) {
   const out = new Set(); let m;
@@ -93,18 +143,37 @@ function extractHashtags(text) {
   return [...out];
 }
 function signToken(payload, ttl = '30d') { return jwt.sign(payload, JWT_SECRET, { expiresIn: ttl }); }
-function authRequired(req, res, next) {
-  const h = req.headers.authorization;
-  if (!h?.startsWith('Bearer ')) return res.status(401).json({ error: 'missing token' });
-  try { req.auth = jwt.verify(h.slice(7), JWT_SECRET); next(); }
-  catch { res.status(401).json({ error: 'invalid token' }); }
+// Sitzung aus dem httpOnly-Cookie: nur der SHA-256 des Tokens liegt in der DB (wie disslxt)
+async function sitzungAus(req) {
+  const token = cookieWert(req, SID);
+  if (!token || token.length > 100) return null;
+  const s = await q1(
+    `SELECT id, user_id, last_seen_at FROM sessions WHERE token_hash = $1 AND last_seen_at > NOW() - ($2 || ' days')::interval`,
+    [sha256(token), SITZUNG_TAGE]);
+  if (!s) return null;
+  if (Date.now() - new Date(s.last_seen_at).getTime() > 5 * 60_000) {
+    q('UPDATE sessions SET last_seen_at = NOW() WHERE id = $1', [s.id]).catch(() => {});
+  }
+  return s;
 }
+async function authRequired(req, res, next) {
+  try {
+    const s = await sitzungAus(req);
+    if (!s) return res.status(401).json({ error: 'not signed in' });
+    req.auth = { uid: s.user_id, sid: s.id };
+    next();
+  } catch (e) { next(e); }
+}
+// Öffentliche Sicht auf ein Konto: NIE die E-Mail-Adresse (nur das eigene Konto über meShape)
 function userShape(u) {
   if (!u) return null;
   return {
-    id: u.id, email: u.email, username: u.username, displayName: u.display_name,
+    id: u.id, username: u.username, displayName: u.display_name,
     bio: u.bio, avatar: u.avatar, isOwner: u.is_owner, createdAt: u.created_at,
   };
+}
+function meShape(u) {
+  return u ? { ...userShape(u), email: u.email, termsAcceptedAt: u.terms_accepted_at } : null;
 }
 
 async function postShape(p, viewerId) {
@@ -145,6 +214,9 @@ function sseAdd(userId, res) {
   if (!sseClients.has(userId)) sseClients.set(userId, new Set());
   sseClients.get(userId).add(res);
 }
+function sseSitzungTrennen(pruefe) {
+  for (const set of sseClients.values()) for (const r of set) if (pruefe(r.nxSid)) { try { r.end(); } catch {} }
+}
 function sseRemove(userId, res) {
   sseClients.get(userId)?.delete(res);
   if (sseClients.get(userId)?.size === 0) sseClients.delete(userId);
@@ -166,8 +238,15 @@ function broadcastToUser(userId, event, data) {
 // App
 // ------------------------------------------------------------
 const app = express();
-app.use(cors());
+app.set('trust proxy', false);
+app.disable('x-powered-by');
 app.use(express.json({ limit: '10mb' })); // groß genug für komprimierte Bilder als base64
+// CSRF: Cookie ist SameSite=Strict, zusätzlich muss jede schreibende Anfrage den eigenen Kopf mitsenden
+app.use('/api', (req, res, next) => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+  if (req.headers['x-nexus'] !== '1') return res.status(403).json({ error: 'missing client header' });
+  next();
+});
 app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '7d' }));
 
 app.get('/api/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
@@ -177,54 +256,168 @@ app.get('/api/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 // ------------------------------------------------------------
 app.post('/api/auth/request-code', async (req, res) => {
   const email = String(req.body?.email || '').trim().toLowerCase();
-  if (!EMAIL_RE.test(email)) return res.status(400).json({ error: 'invalid email' });
+  if (!EMAIL_RE.test(email) || email.length > 254) return res.status(400).json({ error: 'invalid email' });
+  const ip = clientIp(req);
+  if (gedrosselt(`code-ip:${ip}`, 6, 15 * 60_000) || gedrosselt(`code-mail:${email}`, 3, 15 * 60_000)) return bremse(res);
   const code = sixDigit();
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
   await q(
-    `INSERT INTO verification_codes (email, code, expires_at, verified)
-     VALUES ($1, $2, $3, FALSE)
-     ON CONFLICT (email) DO UPDATE SET code = EXCLUDED.code, expires_at = EXCLUDED.expires_at, verified = FALSE, user_id = NULL`,
-    [email, code, expiresAt]
+    `INSERT INTO verification_codes (email, code, expires_at, verified, purpose, attempts)
+     VALUES ($1, $2, $3, FALSE, 'login', 0)
+     ON CONFLICT (email) DO UPDATE SET code = EXCLUDED.code, expires_at = EXCLUDED.expires_at, verified = FALSE,
+       user_id = NULL, purpose = 'login', attempts = 0`,
+    [email, sha256(code), expiresAt]
   );
   try { await sendCode(email, code); }
   catch (e) { console.error('mailer:', e.message); return res.status(500).json({ error: 'could not send email' }); }
-  res.json({ ok: true, message: 'code sent (check MailHog at :8025)' });
+  res.json({ ok: true });
 });
 
 app.post('/api/auth/verify-code', async (req, res) => {
   const email = String(req.body?.email || '').trim().toLowerCase();
   const code = String(req.body?.code || '').trim();
   if (!EMAIL_RE.test(email) || !/^\d{6}$/.test(code)) return res.status(400).json({ error: 'invalid input' });
-  const rec = await q1('SELECT * FROM verification_codes WHERE email = $1', [email]);
-  if (!rec || rec.code !== code) return res.status(401).json({ error: 'wrong code' });
-  if (new Date(rec.expires_at) < new Date()) return res.status(401).json({ error: 'code expired' });
+  if (gedrosselt(`verify-ip:${clientIp(req)}`, 20, 15 * 60_000)) return bremse(res);
+  const rec = await q1(`SELECT * FROM verification_codes WHERE email = $1 AND purpose = 'login'`, [email]);
+  if (!rec || new Date(rec.expires_at) < new Date()) return res.status(401).json({ error: 'That code didn’t work or has expired.' });
+  if (!gleich(rec.code, sha256(code))) {
+    // höchstens 5 Versuche je Code, dann ist er weg (6 Ziffern sind sonst ratbar)
+    const r = await q1('UPDATE verification_codes SET attempts = attempts + 1 WHERE email = $1 RETURNING attempts', [email]);
+    if (r && r.attempts >= 5) await q('DELETE FROM verification_codes WHERE email = $1', [email]);
+    return res.status(401).json({ error: 'That code didn’t work or has expired.' });
+  }
   const existing = await q1('SELECT * FROM users WHERE email = $1', [email]);
   if (existing) {
     await q('DELETE FROM verification_codes WHERE email = $1', [email]);
-    return res.json({ token: signToken({ uid: existing.id }), user: userShape(existing), needsRegistration: false });
+    await sitzungAnlegen(req, res, existing.id);
+    return res.json({ user: meShape(existing), needsRegistration: false });
   }
   await q('UPDATE verification_codes SET verified = TRUE WHERE email = $1', [email]);
   res.json({ regToken: signToken({ regEmail: email }, '15m'), needsRegistration: true });
 });
 
 app.post('/api/auth/register', async (req, res) => {
-  const { regToken, username, displayName, avatar } = req.body || {};
+  const { regToken, username, displayName, avatar, acceptTerms } = req.body || {};
   let payload;
   try { payload = jwt.verify(regToken, JWT_SECRET); }
   catch { return res.status(401).json({ error: 'invalid registration token' }); }
   if (!payload.regEmail) return res.status(401).json({ error: 'invalid registration token' });
+  // Zustimmung zu Nutzungsbedingungen + Datenschutz (Zeitpunkt wird gespeichert, wie bei disslxt)
+  if (acceptTerms !== true) return res.status(400).json({ error: 'Please accept the Terms of Use and the Privacy Policy.' });
   const email = payload.regEmail;
+  const verified = await q1(`SELECT 1 FROM verification_codes WHERE email = $1 AND verified = TRUE`, [email]);
+  if (!verified) return res.status(401).json({ error: 'invalid registration token' });
   const uname = String(username || '').trim().toLowerCase();
   if (!USERNAME_RE.test(uname)) return res.status(400).json({ error: 'invalid username (2-20, a-z 0-9 _)' });
   if (await q1('SELECT 1 FROM users WHERE username = $1', [uname])) return res.status(409).json({ error: 'username taken' });
-  const dn = String(displayName || '').trim() || uname;
+  const dn = String(displayName || '').trim().slice(0, 30) || uname;
   const av = typeof avatar === 'string' && avatar.startsWith('data:image/') ? avatar.slice(0, 500_000) : null;
   const user = await q1(
-    `INSERT INTO users (email, username, display_name, avatar) VALUES ($1,$2,$3,$4) RETURNING *`,
+    `INSERT INTO users (email, username, display_name, avatar, terms_accepted_at) VALUES ($1,$2,$3,$4,NOW()) RETURNING *`,
     [email, uname, dn, av]
   );
   await q('DELETE FROM verification_codes WHERE email = $1', [email]);
-  res.json({ token: signToken({ uid: user.id }), user: userShape(user), needsRegistration: false });
+  await sitzungAnlegen(req, res, user.id);
+  res.json({ user: meShape(user), needsRegistration: false });
+});
+
+// Wer bin ich? 200 mit user oder null (kein 401-Rauschen beim Start ohne Anmeldung)
+app.get('/api/auth/session', async (req, res) => {
+  const s = await sitzungAus(req);
+  if (!s) return res.json({ user: null });
+  res.json({ user: meShape(await q1('SELECT * FROM users WHERE id = $1', [s.user_id])) });
+});
+
+app.post('/api/auth/logout', async (req, res) => {
+  const s = await sitzungAus(req);
+  if (s) { await q('DELETE FROM sessions WHERE id = $1', [s.id]); sseSitzungTrennen((sid) => sid === s.id); }
+  cookieSetzen(res, '', 0);
+  res.json({ ok: true });
+});
+
+// ------------------------------------------------------------
+// Konto: Geräte, Export, Löschen (Rechte nach Art. 15/17/20 DSGVO – wie bei disslxt)
+// ------------------------------------------------------------
+app.get('/api/account/sessions', authRequired, async (req, res) => {
+  const rows = await q(`SELECT id, device, created_at, last_seen_at FROM sessions WHERE user_id = $1 ORDER BY last_seen_at DESC`, [req.auth.uid]);
+  res.json({ sessions: rows.map((r) => ({ id: r.id, device: r.device, createdAt: r.created_at, lastSeenAt: r.last_seen_at, current: r.id === req.auth.sid })) });
+});
+app.delete('/api/account/sessions/:id', authRequired, async (req, res) => {
+  const r = await q1('DELETE FROM sessions WHERE id = $1 AND user_id = $2 RETURNING id', [req.params.id, req.auth.uid]);
+  if (!r) return res.status(404).json({ error: 'not found' });
+  sseSitzungTrennen((sid) => sid === r.id);
+  if (r.id === req.auth.sid) cookieSetzen(res, '', 0);
+  res.json({ ok: true });
+});
+app.post('/api/account/sessions/end-others', authRequired, async (req, res) => {
+  const rows = await q('DELETE FROM sessions WHERE user_id = $1 AND id <> $2 RETURNING id', [req.auth.uid, req.auth.sid]);
+  const weg = new Set(rows.map((r) => r.id));
+  sseSitzungTrennen((sid) => weg.has(sid));
+  res.json({ ok: true, ended: rows.length });
+});
+
+app.get('/api/account/export', authRequired, async (req, res) => {
+  if (gedrosselt(`export:${req.auth.uid}`, 3, 3600_000)) return bremse(res);
+  const uid = req.auth.uid;
+  const me = await q1('SELECT * FROM users WHERE id = $1', [uid]);
+  const posts = await q('SELECT id, content, image_url, reply_to, repost_of, created_at FROM posts WHERE author_id = $1 ORDER BY created_at', [uid]);
+  const likes = await q('SELECT post_id, created_at FROM likes WHERE user_id = $1 ORDER BY created_at', [uid]);
+  const following = await q(`SELECT u.username, f.created_at FROM follows f JOIN users u ON u.id = f.followee_id WHERE f.follower_id = $1`, [uid]);
+  const followers = await q(`SELECT u.username, f.created_at FROM follows f JOIN users u ON u.id = f.follower_id WHERE f.followee_id = $1`, [uid]);
+  const messages = await q(`SELECT m.id, s.username AS "from", r.username AS "to", m.content, m.created_at, m.read_at
+      FROM messages m JOIN users s ON s.id = m.sender_id JOIN users r ON r.id = m.receiver_id
+      WHERE m.sender_id = $1 OR m.receiver_id = $1 ORDER BY m.created_at`, [uid]);
+  const sessions = await q('SELECT device, created_at, last_seen_at FROM sessions WHERE user_id = $1', [uid]);
+  const datei = {
+    exportedAt: new Date().toISOString(), service: 'Nexus (nexus.slxt.org)',
+    account: { username: me.username, displayName: me.display_name, email: me.email, bio: me.bio, createdAt: me.created_at,
+      termsAcceptedAt: me.terms_accepted_at, hasAvatar: !!me.avatar },
+    posts, likes, following, followers, directMessages: messages, devices: sessions,
+    note: 'Images are listed by their address only. No passwords exist; login codes and session secrets are never exported.',
+  };
+  res.setHeader('Content-Disposition', `attachment; filename="nexus-${me.username}-${new Date().toISOString().slice(0, 10)}.json"`);
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(datei);
+});
+
+// Konto löschen: Code an die eigene Adresse, dann mit Code bestätigen
+app.post('/api/account/delete/request-code', authRequired, async (req, res) => {
+  const me = await q1('SELECT * FROM users WHERE id = $1', [req.auth.uid]);
+  if (me.is_owner) return res.status(403).json({ error: 'The owner account can’t be deleted here.' });
+  if (gedrosselt(`del-code:${me.id}`, 3, 3600_000)) return bremse(res);
+  const code = sixDigit();
+  await q(
+    `INSERT INTO verification_codes (email, code, expires_at, verified, purpose, attempts, user_id)
+     VALUES ($1, $2, NOW() + INTERVAL '10 minutes', FALSE, 'delete', 0, $3)
+     ON CONFLICT (email) DO UPDATE SET code = EXCLUDED.code, expires_at = EXCLUDED.expires_at, verified = FALSE,
+       purpose = 'delete', attempts = 0, user_id = EXCLUDED.user_id`,
+    [me.email, sha256(code), me.id]);
+  try { await sendCode(me.email, code, 'delete'); }
+  catch (e) { console.error('mailer:', e.message); return res.status(500).json({ error: 'could not send email' }); }
+  res.json({ ok: true });
+});
+app.delete('/api/account', authRequired, async (req, res) => {
+  const me = await q1('SELECT * FROM users WHERE id = $1', [req.auth.uid]);
+  if (me.is_owner) return res.status(403).json({ error: 'The owner account can’t be deleted here.' });
+  const code = String(req.body?.code || '').trim();
+  const rec = await q1(`SELECT * FROM verification_codes WHERE email = $1 AND purpose = 'delete' AND user_id = $2`, [me.email, me.id]);
+  if (!rec || new Date(rec.expires_at) < new Date() || !/^\d{6}$/.test(code)) return res.status(401).json({ error: 'That code didn’t work or has expired.' });
+  if (!gleich(rec.code, sha256(code))) {
+    const r = await q1('UPDATE verification_codes SET attempts = attempts + 1 WHERE email = $1 RETURNING attempts', [me.email]);
+    if (r && r.attempts >= 5) await q('DELETE FROM verification_codes WHERE email = $1', [me.email]);
+    return res.status(401).json({ error: 'That code didn’t work or has expired.' });
+  }
+  // Bilder der eigenen Beiträge mit entfernen, dann alles per ON DELETE CASCADE (Beiträge, Likes, Folgen, Nachrichten, Sitzungen)
+  const bilder = await q(`SELECT image_url FROM posts WHERE author_id = $1 AND image_url LIKE '/uploads/%'`, [me.id]);
+  const sitzungen = new Set((await q('SELECT id FROM sessions WHERE user_id = $1', [me.id])).map((r) => r.id));
+  await q('DELETE FROM verification_codes WHERE email = $1', [me.email]);
+  await q('DELETE FROM users WHERE id = $1', [me.id]);
+  for (const b of bilder) fs.promises.unlink(path.join(UPLOAD_DIR, path.basename(b.image_url))).catch(() => {});
+  sseSitzungTrennen((sid) => sitzungen.has(sid));
+  broadcastAll('post:deleted', { id: null });
+  cookieSetzen(res, '', 0);
+  console.log(`[account] deleted ${me.username}`);
+  res.json({ ok: true });
 });
 
 // ------------------------------------------------------------
@@ -233,7 +426,7 @@ app.post('/api/auth/register', async (req, res) => {
 app.get('/api/me', authRequired, async (req, res) => {
   const user = await q1('SELECT * FROM users WHERE id = $1', [req.auth.uid]);
   if (!user) return res.status(404).json({ error: 'not found' });
-  res.json({ user: userShape(user) });
+  res.json({ user: meShape(user) });
 });
 
 app.patch('/api/me', authRequired, async (req, res) => {
@@ -249,7 +442,7 @@ app.patch('/api/me', authRequired, async (req, res) => {
     `UPDATE users SET display_name=$1, bio=$2, avatar=$3 WHERE id=$4 RETURNING *`,
     [dn, b, av, me.id]
   );
-  res.json({ user: userShape(updated) });
+  res.json({ user: meShape(updated) });
 });
 
 // ------------------------------------------------------------
@@ -259,6 +452,7 @@ const DATA_URL_RE = /^data:image\/(jpeg|jpg|png|gif|webp);base64,(.+)$/;
 const MAX_UPLOAD_BYTES = 3 * 1024 * 1024; // 3 MB nach Komprimierung im Client
 
 app.post('/api/upload', authRequired, async (req, res) => {
+  if (gedrosselt(`upload:${req.auth.uid}`, 20, 3600_000)) return bremse(res);
   const dataUrl = req.body?.dataUrl;
   if (typeof dataUrl !== 'string') return res.status(400).json({ error: 'dataUrl required' });
   const m = dataUrl.match(DATA_URL_RE);
@@ -358,6 +552,7 @@ app.get('/api/posts', authRequired, async (req, res) => {
 });
 
 app.post('/api/posts', authRequired, async (req, res) => {
+  if (gedrosselt(`post:${req.auth.uid}`, 30, 10 * 60_000)) return bremse(res);
   const content = String(req.body?.content || '').trim();
   const replyTo = req.body?.replyTo || null;
   const repostOf = req.body?.repostOf || null;
@@ -499,6 +694,7 @@ app.get('/api/messages/with/:userId', authRequired, async (req, res) => {
 
 // Send a DM
 app.post('/api/messages', authRequired, async (req, res) => {
+  if (gedrosselt(`dm:${req.auth.uid}`, 60, 10 * 60_000)) return bremse(res);
   const receiverId = req.body?.receiverId;
   const content = String(req.body?.content || '').trim();
   if (!receiverId || receiverId === req.auth.uid) return res.status(400).json({ error: 'invalid receiver' });
@@ -535,12 +731,11 @@ app.get('/api/messages/unread', authRequired, async (req, res) => {
 // ------------------------------------------------------------
 // SSE — live updates
 // ------------------------------------------------------------
-app.get('/api/events', (req, res) => {
-  const token = req.query.token;
-  let userId;
-  try { userId = jwt.verify(token, JWT_SECRET).uid; }
-  catch { return res.status(401).end(); }
-  if (!userId) return res.status(401).end();
+app.get('/api/events', async (req, res) => {
+  const s = await sitzungAus(req).catch(() => null);
+  if (!s) return res.status(401).end();
+  const userId = s.user_id;
+  res.nxSid = s.id;
 
   res.set({
     'Content-Type': 'text/event-stream',
@@ -566,6 +761,31 @@ async function bootstrap() {
     catch { attempts++; await new Promise(r => setTimeout(r, 1000)); }
   }
   if (attempts >= 30) { console.error('DB unreachable'); process.exit(1); }
+
+  // Migrationen (idempotent; init.sql gilt nur für neue Datenbanken)
+  await q(`CREATE TABLE IF NOT EXISTS sessions (
+      id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash   TEXT UNIQUE NOT NULL,
+      device       TEXT NOT NULL DEFAULT '',
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+  await q(`CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)`);
+  await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMPTZ`);
+  await q(`ALTER TABLE verification_codes ADD COLUMN IF NOT EXISTS attempts INT NOT NULL DEFAULT 0`);
+  await q(`ALTER TABLE verification_codes ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT 'login'`);
+  // Alte Klartext-Codes sind ab jetzt ungültig (es werden nur noch Hashes verglichen)
+  await q(`DELETE FROM verification_codes WHERE length(code) <> 64`);
+
+  // Aufräumen: abgelaufene Codes und alte Sitzungen (Speicherbegrenzung, Art. 5 DSGVO) – beim Start und stündlich
+  const aufraeumen = async () => {
+    try {
+      await q(`DELETE FROM verification_codes WHERE expires_at < NOW() - INTERVAL '1 hour'`);
+      await q(`DELETE FROM sessions WHERE last_seen_at < NOW() - ($1 || ' days')::interval`, [SITZUNG_TAGE]);
+    } catch (e) { console.warn('[aufraeumen]', e.message); }
+  };
+  await aufraeumen();
+  setInterval(aufraeumen, 3600_000).unref();
 
   const existing = await q1('SELECT * FROM users WHERE email = $1', [OWNER_EMAIL]);
   if (!existing) {

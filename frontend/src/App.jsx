@@ -1,12 +1,12 @@
 // Nexus – Oberfläche im Stil von dash.slxt.dev / slxt.org (Apple HIG). Logik und API unverändert.
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { flushSync } from 'react-dom';
+import { flushSync, createPortal } from 'react-dom';
 import {
   Home, Hash, MessageCircle, User, Settings, SquarePen, ChevronLeft, Heart, Repeat2, Trash2,
   Image as ImageIcon, X, Check, Loader2, AlertCircle, BadgeCheck, LogOut, UserPlus, Search,
-  Send, Inbox, TrendingUp, Sparkles, MailCheck, Sun, Moon,
+  Send, Inbox, TrendingUp, Sparkles, MailCheck, Sun, Moon, ShieldCheck, Download, Monitor, Smartphone, AlertTriangle,
 } from 'lucide-react';
-import { api, auth, connectEvents, compressImage } from './api.js';
+import { api, connectEvents, compressImage } from './api.js';
 
 const MAX_POST_LEN = 280;
 const MAX_DM_LEN = 1000;
@@ -31,6 +31,20 @@ const extractHashtags = (text) => {
   const m = text.match(/#[\wÀ-ſ]+/g) || [];
   return [...new Set(m.map((t) => t.substring(1).toLowerCase()))];
 };
+
+// Kurzer Hinweis unten (wie auf allen slxt-Seiten): window.dispatchEvent(new CustomEvent('nexus:hinweis', {detail: 'Text'}))
+const hinweis = (text) => window.dispatchEvent(new CustomEvent('nexus:hinweis', { detail: text }));
+function Hinweise() {
+  const [text, setText] = useState('');
+  const [an, setAn] = useState(false);
+  useEffect(() => {
+    let t;
+    const zeigen = (e) => { setText(e.detail); setAn(true); clearTimeout(t); t = setTimeout(() => setAn(false), 2800); };
+    window.addEventListener('nexus:hinweis', zeigen);
+    return () => { window.removeEventListener('nexus:hinweis', zeigen); clearTimeout(t); };
+  }, []);
+  return <div className={`hinweis-toast${an ? ' an' : ''}`} role="status" aria-live="polite">{text}</div>;
+}
 
 // ============================================================ Himmel (wie slxt.org)
 function Himmel() {
@@ -219,7 +233,8 @@ function Ueberlagerung({ titel, onClose, children, rechts }) {
     setTimeout(() => ref.current?.querySelector('textarea, input')?.focus(), 30);
     return () => { window.removeEventListener('keydown', taste); document.documentElement.style.overflow = ''; vorher?.focus?.(); };
   }, []);
-  return (
+  // Portal an <body>: sonst wird das Blatt in Glas-Karten (backdrop-filter = eigener Bezugsrahmen) eingesperrt
+  return createPortal(
     <div className="ueberlagerung">
       <div className="hintergrund" onClick={onClose} aria-hidden="true" />
       <div className="blatt" role="dialog" aria-modal="true" aria-label={titel} ref={ref}>
@@ -230,7 +245,8 @@ function Ueberlagerung({ titel, onClose, children, rechts }) {
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -259,6 +275,7 @@ function AuthScreen({ onAuthenticated }) {
   const [newUsername, setNewUsername] = useState('');
   const [newDisplay, setNewDisplay] = useState('');
   const [newAvatar, setNewAvatar] = useState(null);
+  const [zustimmung, setZustimmung] = useState(false);
   const fileRef = useRef(null);
 
   const submitEmail = async (e) => {
@@ -279,7 +296,7 @@ function AuthScreen({ onAuthenticated }) {
         const sug = email.split('@')[0].replace(/[^a-z0-9_]/gi, '').slice(0, 15) || 'user';
         setNewUsername(sug); setNewDisplay(sug);
         setStep('profile');
-      } else { auth.setToken(res.token); onAuthenticated(res.user); }
+      } else { onAuthenticated(res.user); }
     } catch (err) { setError(err.message || 'That code didn’t work.'); }
     setBusy(false);
   };
@@ -293,8 +310,8 @@ function AuthScreen({ onAuthenticated }) {
   const submitProfile = async (e) => {
     e.preventDefault(); setError(''); setBusy(true);
     try {
-      const res = await api.register(regToken, newUsername, newDisplay, newAvatar);
-      auth.setToken(res.token); onAuthenticated(res.user);
+      const res = await api.register(regToken, newUsername, newDisplay, newAvatar, zustimmung);
+      onAuthenticated(res.user);
     } catch (err) { setError(err.message || 'Could not create your profile.'); }
     setBusy(false);
   };
@@ -361,11 +378,15 @@ function AuthScreen({ onAuthenticated }) {
             <label className="feld"><span>Display Name</span>
               <input className="eingabe" value={newDisplay} onChange={(e) => setNewDisplay(e.target.value)} maxLength={30} required />
             </label>
-            <button type="submit" disabled={busy} className="knopf primaer gross">
+            <label className="zustimmung-box">
+              <input type="checkbox" checked={zustimmung} onChange={(e) => setZustimmung(e.target.checked)} required />
+              <span>I accept the <a href="https://slxt.org/nutzungsbedingungen/" target="_blank" rel="noopener noreferrer">Terms of Use</a>, have read
+                the <a href="https://slxt.org/datenschutz/#nexus" target="_blank" rel="noopener noreferrer">Privacy Policy</a> (both in German) and am at least 14.</span>
+            </label>
+            <button type="submit" disabled={busy || !zustimmung} className="knopf primaer gross">
               {busy ? <Loader2 size={18} className="dreht" aria-hidden="true" /> : null}{busy ? 'Creating…' : 'Join Nexus'}
             </button>
-            <small className="leise zustimmung">By joining you accept the <a href="https://slxt.org/nutzungsbedingungen/" target="_blank" rel="noopener noreferrer">Terms of Use</a> and
-              confirm you are at least 14. How your data is used: <a href="https://slxt.org/datenschutz/#nexus" target="_blank" rel="noopener noreferrer">Privacy Policy</a> (both in German).</small>
+            <small className="leise zustimmung">Only your email, profile and what you post are stored – no tracking, no ads. You can download or delete everything in Settings.</small>
             <Fehler />
           </form>
         )}
@@ -829,6 +850,7 @@ function SettingsView({ currentUser, onNavigate, onUserUpdated, onLogout }) {
   const fileRef = useRef(null);
   const gesperrt = currentUser.isOwner;
   const [modus, setModus] = useModus();
+  const geaendert = displayName !== currentUser.displayName || bio !== (currentUser.bio || '') || avatar !== currentUser.avatar;
 
   const handleAvatar = async (e) => {
     const f = e.target.files?.[0];
@@ -843,6 +865,7 @@ function SettingsView({ currentUser, onNavigate, onUserUpdated, onLogout }) {
       const r = await api.updateMe({ displayName, bio, avatar });
       onUserUpdated(r.user);
       setSaved(true); setTimeout(() => setSaved(false), 2000);
+      hinweis('Profile saved');
     } catch (e) { setError(e.message || 'Could not save.'); }
     setSaving(false);
   };
@@ -850,40 +873,183 @@ function SettingsView({ currentUser, onNavigate, onUserUpdated, onLogout }) {
   return (
     <>
       <Kopf titel="Settings" onBack={() => onNavigate('profile', currentUser.id)} backLabel="Profile" />
-      <div className="karte einstellungen">
-        {gesperrt && <div className="hinweis-box warn">This is the system’s owner profile – it can’t be edited here.</div>}
-        <div className="avatar-wahl">
-          <Avatar user={{ ...currentUser, avatar }} size={80} />
-          <button type="button" className="knopf" disabled={gesperrt} onClick={() => fileRef.current?.click()}><ImageIcon size={18} aria-hidden="true" />Change Photo</button>
-          <input ref={fileRef} type="file" accept="image/*" onChange={handleAvatar} hidden />
-        </div>
-        <div className="feld"><span>Appearance</span>
+      <div className="einstellungen-liste">
+        <section className="karte einstellungen" aria-labelledby="ein-profil">
+          <h2 id="ein-profil" className="gruppe-titel">Profile</h2>
+          {gesperrt && <div className="hinweis-box warn">This is the system’s owner profile – it can’t be edited here.</div>}
+          <div className="avatar-wahl">
+            <Avatar user={{ ...currentUser, avatar }} size={80} />
+            <button type="button" className="knopf" disabled={gesperrt} onClick={() => fileRef.current?.click()}><ImageIcon size={18} aria-hidden="true" />Change Photo</button>
+            {avatar && !gesperrt && <button type="button" className="knopf ohne klein" onClick={() => setAvatar(null)}>Remove</button>}
+            <input ref={fileRef} type="file" accept="image/*" onChange={handleAvatar} hidden />
+          </div>
+          <label className="feld"><span>Display Name</span>
+            <input className="eingabe" disabled={gesperrt} value={displayName} onChange={(e) => setDisplayName(e.target.value)} maxLength={30} />
+          </label>
+          <div className="feld"><span>Username</span>
+            <div className="eingabe" style={{ color: "var(--text-2)" }}>@{currentUser.username}</div>
+            <small>Usernames can’t be changed.</small>
+          </div>
+          <label className="feld"><span>Bio</span>
+            <textarea className="eingabe" disabled={gesperrt} value={bio} onChange={(e) => setBio(e.target.value)} maxLength={160} rows={3} placeholder="Tell people a little about yourself" />
+            <small style={{ textAlign: 'right' }}>{160 - bio.length} characters left</small>
+          </label>
+          <div className="feld"><span>Email</span>
+            <div className="eingabe" style={{ color: "var(--text-2)" }}>{currentUser.email}</div>
+            <small>Only you can see it. It’s used to send your sign-in codes.</small>
+          </div>
+          <div className="zeile-knoepfe">
+            <button type="button" className="knopf primaer" onClick={save} disabled={saving || gesperrt || !geaendert}>
+              {saving ? <Loader2 size={16} className="dreht" aria-hidden="true" /> : saved ? <Check size={16} aria-hidden="true" /> : null}
+              {saved ? 'Saved' : saving ? 'Saving…' : 'Save Changes'}
+            </button>
+          </div>
+          {error && <div className="fehler" role="alert"><AlertCircle size={16} aria-hidden="true" />{error}</div>}
+        </section>
+
+        <section className="karte einstellungen" aria-labelledby="ein-aussehen">
+          <h2 id="ein-aussehen" className="gruppe-titel">Appearance</h2>
           <Segmente label="Appearance" werte={[['hell', 'Light'], ['dunkel', 'Dark']]} wert={modus} onChange={setModus} />
-          <small>Saved in this browser. Dark is the default.</small>
-        </div>
-        <label className="feld"><span>Display Name</span>
-          <input className="eingabe" disabled={gesperrt} value={displayName} onChange={(e) => setDisplayName(e.target.value)} maxLength={30} />
-        </label>
-        <div className="feld"><span>Username</span>
-          <div className="eingabe" aria-readonly="true" style={{ color: 'var(--text-2)' }}>@{currentUser.username}</div>
-          <small>Usernames can’t be changed.</small>
-        </div>
-        <label className="feld"><span>Bio</span>
-          <textarea className="eingabe" disabled={gesperrt} value={bio} onChange={(e) => setBio(e.target.value)} maxLength={160} rows={3} placeholder="Tell people a little about yourself" />
-          <small style={{ textAlign: 'right' }}>{160 - bio.length} characters left</small>
-        </label>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button type="button" className="knopf primaer" onClick={save} disabled={saving || gesperrt}>
-            {saving ? <Loader2 size={16} className="dreht" aria-hidden="true" /> : saved ? <Check size={16} aria-hidden="true" /> : null}
-            {saved ? 'Saved' : saving ? 'Saving…' : 'Save Changes'}
-          </button>
-          <button type="button" className="knopf gefahr nur-schmal" onClick={onLogout}><LogOut size={18} aria-hidden="true" />Log Out</button>
-        </div>
-        {error && <div className="fehler" role="alert"><AlertCircle size={16} aria-hidden="true" />{error}</div>}
-        <RechtLinks />
-        <small className="leise">To delete your account, email office@slxt.org from your registered address.</small>
+          <small className="leise">Saved in this browser. Dark is the default.</small>
+        </section>
+
+        <Geraete onLogout={onLogout} />
+        <DeineDaten currentUser={currentUser} onDeleted={onLogout} />
+
+        <section className="karte einstellungen" aria-label="Legal">
+          <RechtLinks />
+        </section>
       </div>
     </>
+  );
+}
+
+// Angemeldete Geräte (wie disslxt: Browser + System + letzte Aktivität, keine IP-Adresse)
+function Geraete({ onLogout }) {
+  const [liste, setListe] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const laden = useCallback(async () => { try { setListe((await api.sessions()).sessions); } catch { setListe([]); } }, []);
+  useEffect(() => { laden(); }, [laden]);
+  const andere = (liste || []).filter((s) => !s.current).length;
+  const beenden = async (s) => {
+    if (s.current) { onLogout(); return; }
+    await api.endSession(s.id); hinweis('Signed out on that device'); laden();
+  };
+  const alleAnderen = async () => {
+    setBusy(true);
+    try { const r = await api.endOtherSessions(); hinweis(r.ended ? `Signed out on ${r.ended} other device${r.ended > 1 ? 's' : ''}` : 'No other devices'); laden(); }
+    finally { setBusy(false); }
+  };
+  return (
+    <section className="karte einstellungen" aria-labelledby="ein-geraete">
+      <h2 id="ein-geraete" className="gruppe-titel"><ShieldCheck size={18} aria-hidden="true" />Security</h2>
+      <p className="leise">Devices signed in to your account. We store the browser, the system and when it was last used – never your IP address.</p>
+      {!liste ? <Laedt /> : (
+        <ul className="geraete" aria-label="Signed-in devices">
+          {liste.map((s) => {
+            const Icon = /iPhone|Android|iPad/.test(s.device) ? Smartphone : Monitor;
+            return (
+              <li key={s.id}>
+                <Icon size={20} aria-hidden="true" />
+                <div className="geraet-text">
+                  <strong>{s.device || 'Browser'}{s.current && <span className="pille-klein">This device</span>}</strong>
+                  <small>Active {formatTime(s.lastSeenAt)} · since {new Date(s.createdAt).toLocaleDateString()}</small>
+                </div>
+                <button type="button" className="knopf klein" onClick={() => beenden(s)}>{s.current ? 'Log Out' : 'Sign Out'}</button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <div className="zeile-knoepfe">
+        <button type="button" className="knopf" disabled={busy || !andere} onClick={alleAnderen}>Sign Out Everywhere Else</button>
+        <button type="button" className="knopf gefahr" onClick={onLogout}><LogOut size={18} aria-hidden="true" />Log Out</button>
+      </div>
+    </section>
+  );
+}
+
+// Daten herunterladen (Art. 15/20 DSGVO) und Konto löschen (Art. 17) – Bestätigung per Code an die eigene Adresse
+function DeineDaten({ currentUser, onDeleted }) {
+  const [exportBusy, setExportBusy] = useState(false);
+  const [loeschen, setLoeschen] = useState(false);
+  const [schritt, setSchritt] = useState('frage');
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const herunterladen = async () => {
+    setExportBusy(true);
+    try {
+      const { blob, name } = await api.exportData();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      hinweis('Your data was downloaded');
+    } catch (e) { hinweis(e.message || 'Download failed'); }
+    setExportBusy(false);
+  };
+  const codeSenden = async () => {
+    setError(''); setBusy(true);
+    try { await api.requestDeleteCode(); setSchritt('code'); } catch (e) { setError(e.message); }
+    setBusy(false);
+  };
+  const endgueltig = async (e) => {
+    e.preventDefault(); setError(''); setBusy(true);
+    try { await api.deleteAccount(code); setLoeschen(false); onDeleted(true); hinweis('Your account was deleted'); }
+    catch (err) { setError(err.message); }
+    setBusy(false);
+  };
+  const schliessen = () => { setLoeschen(false); setSchritt('frage'); setCode(''); setError(''); };
+
+  return (
+    <section className="karte einstellungen" aria-labelledby="ein-daten">
+      <h2 id="ein-daten" className="gruppe-titel"><Download size={18} aria-hidden="true" />Your Data</h2>
+      <p className="leise">Download a copy of everything you created here – profile, posts, likes, follows and direct messages – as a JSON file.</p>
+      <div className="zeile-knoepfe">
+        <button type="button" className="knopf" onClick={herunterladen} disabled={exportBusy}>
+          {exportBusy ? <Loader2 size={16} className="dreht" aria-hidden="true" /> : <Download size={16} aria-hidden="true" />}Download My Data
+        </button>
+        {!currentUser.isOwner && (
+          <button type="button" className="knopf gefahr" onClick={() => setLoeschen(true)}><Trash2 size={16} aria-hidden="true" />Delete Account…</button>
+        )}
+      </div>
+      {loeschen && (
+        <Ueberlagerung titel="Delete Account" onClose={schliessen}>
+          <div className="blatt-inhalt loeschen">
+            <AlertTriangle className="warn-symbol" aria-hidden="true" />
+            {schritt === 'frage' ? (
+              <>
+                <p><strong>This permanently deletes @{currentUser.username}</strong> – your profile, posts, replies, likes, follows and all
+                  direct messages (also in the other person’s inbox). It can’t be undone.</p>
+                <p className="leise">Backups of the server are removed after eight weeks at the latest. Tip: download your data first.</p>
+                <p className="leise">To make sure it’s you, we’ll send a 6-digit code to <strong>{currentUser.email}</strong>.</p>
+                <div className="zeile-knoepfe">
+                  <button type="button" className="knopf" onClick={schliessen}>Cancel</button>
+                  <button type="button" className="knopf gefahr-voll" onClick={codeSenden} disabled={busy}>
+                    {busy ? <Loader2 size={16} className="dreht" aria-hidden="true" /> : null}Send Code
+                  </button>
+                </div>
+              </>
+            ) : (
+              <form onSubmit={endgueltig}>
+                <label className="feld"><span>Code from the email</span>
+                  <input className="eingabe code" autoFocus required maxLength={6} value={code} inputMode="numeric" autoComplete="one-time-code"
+                    onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} placeholder="000000" />
+                </label>
+                <div className="zeile-knoepfe">
+                  <button type="button" className="knopf" onClick={schliessen}>Cancel</button>
+                  <button type="submit" className="knopf gefahr-voll" disabled={busy || code.length !== 6}>
+                    {busy ? <Loader2 size={16} className="dreht" aria-hidden="true" /> : null}Delete Permanently
+                  </button>
+                </div>
+              </form>
+            )}
+            {error && <div className="fehler" role="alert"><AlertCircle size={16} aria-hidden="true" />{error}</div>}
+          </div>
+        </Ueberlagerung>
+      )}
+    </section>
   );
 }
 
@@ -1117,11 +1283,27 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      if (!auth.getToken()) { setLoading(false); return; }
-      try { const r = await api.me(); setCurrentUser(r.user); }
-      catch { auth.clear(); }
+      try { localStorage.removeItem('nexus_token'); } catch {}   // Rest der alten Token-Anmeldung entfernen
+      try { const r = await api.session(); setCurrentUser(r.user); } catch {}
       setLoading(false);
     })();
+    const weg = () => setCurrentUser(null);          // Sitzung beendet (anderes Gerät, abgelaufen)
+    window.addEventListener('nexus:abgemeldet', weg);
+    return () => window.removeEventListener('nexus:abgemeldet', weg);
+  }, []);
+
+  // Adresse ⇄ Ansicht: Zurück/Vor im Browser funktioniert, Links lassen sich teilen (#/profile/<id>, #/post/<id> …)
+  useEffect(() => {
+    const lesen = () => {
+      const [, name = 'feed', ...rest] = location.hash.replace(/^#/, '').split('/');
+      const payload = rest.length ? decodeURIComponent(rest.join('/')) : null;
+      const bekannt = ['feed', 'explore', 'hashtag', 'profile', 'post', 'settings', 'messages', 'dm'];
+      setView((v) => (bekannt.includes(name) && (v.name !== name || String(v.payload ?? '') !== String(payload ?? ''))
+        ? { name, payload: name === 'explore' && payload ? { suche: payload } : payload } : v));
+    };
+    lesen();
+    window.addEventListener('hashchange', lesen);
+    return () => window.removeEventListener('hashchange', lesen);
   }, []);
 
   const refreshUnread = useCallback(async () => {
@@ -1149,9 +1331,16 @@ export default function App() {
   useEffect(() => { document.title = unreadDMs > 0 ? `(${unreadDMs}) Nexus` : 'Nexus'; }, [unreadDMs]);
 
   const onAuthenticated = (user) => { setCurrentUser(user); setView({ name: 'feed', payload: null }); };
-  const onLogout = () => { auth.clear(); setCurrentUser(null); setView({ name: 'feed', payload: null }); };
+  const onLogout = async (schonWeg = false) => {
+    if (schonWeg !== true) { try { await api.logout(); } catch {} }
+    setCurrentUser(null); setView({ name: 'feed', payload: null });
+    history.replaceState(null, '', location.pathname);
+  };
   const navigate = (name, payload = null) => {
     setView({ name, payload });
+    const teil = payload && typeof payload === 'object' ? (payload.suche || '') : (payload ?? '');
+    const ziel = `#/${name}${teil ? '/' + encodeURIComponent(teil) : ''}`;
+    if (location.hash !== ziel) history.pushState(null, '', ziel);
     window.scrollTo({ top: 0, behavior: ruhig() ? 'auto' : 'smooth' });
     if (name === 'dm') setUnreadDMs(0);
   };
@@ -1160,7 +1349,7 @@ export default function App() {
   const oeffneVerfassen = () => setComposeOpen(true);
 
   if (loading) return <><Himmel /><Laedt text="" /></>;
-  if (!currentUser) return <><Himmel /><AuthScreen onAuthenticated={onAuthenticated} /></>;
+  if (!currentUser) return <><Himmel /><AuthScreen onAuthenticated={onAuthenticated} /><Hinweise /></>;
 
   const shared = { currentUser, onNavigate: navigate, onHashtag: handleHashtag, onLightbox: setLightboxSrc, refreshKey, onRefresh: triggerRefresh, onCompose: oeffneVerfassen };
   let content;
@@ -1185,7 +1374,7 @@ export default function App() {
       <Himmel />
       <div className="app">
         <Sidebar currentUser={currentUser} currentView={navView} onNavigate={navigate} onLogout={onLogout} onCompose={oeffneVerfassen} unreadDMs={unreadDMs} />
-        <main className="haupt" id="inhalt">{content}</main>
+        <main className="haupt" id="inhalt"><div className="ansicht" key={`${view.name}:${typeof view.payload === 'object' ? '' : view.payload ?? ''}`}>{content}</div></main>
         <RightPanel onNavigate={navigate} refreshKey={refreshKey} onRefresh={triggerRefresh} />
       </div>
       <TabLeiste currentView={navView} onNavigate={navigate} currentUser={currentUser} unreadDMs={unreadDMs} />
@@ -1194,6 +1383,7 @@ export default function App() {
           onSubmit={async ({ content, imageUrl }) => { await api.createPost({ content, imageUrl }); triggerRefresh(); }} />
       )}
       {lightboxSrc && <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
+      <Hinweise />
     </>
   );
 }
