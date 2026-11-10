@@ -16,6 +16,26 @@ Himmel-Verlauf, Sternenhimmel im dunklen Modus, Glas-Karten, Systemschrift (kein
               └──────────┘   └──────────┘
 ```
 
+## Datenschutz & Sicherheit (seit 10.11.2026, gleiches Prinzip wie disslxt)
+
+| Thema | Umsetzung |
+|---|---|
+| Anmeldung | 6-stelliger Code per Mail (kryptografisch zufällig, nur als SHA-256 gespeichert, 10 min, höchstens 5 Versuche), Drossel je IP und Adresse; fail2ban-Jails `nexus-auth`/`nexus-codespam` am Server |
+| Sitzung | httpOnly-Cookie `nx_sid` (SameSite=Strict, Secure), in der DB nur der Hash + Gerät (Browser · System) + letzte Aktivität, **keine IP**; endet nach 30 Tagen ohne Nutzung; Live-Stream über das Cookie |
+| CSRF | jede schreibende Anfrage braucht `X-Nexus: 1`; kein offenes CORS |
+| E-Mail | nur fürs eigene Konto (`meShape`) – nie in Posts, Suche oder Live-Stream |
+| Zustimmung | Registrierung nur mit Häkchen (Nutzungsbedingungen + Datenschutz, ab 14), Zeitpunkt in `users.terms_accepted_at` |
+| Rechte | Settings → Security: Geräte, einzeln/überall sonst abmelden · Settings → Your Data: Export (JSON, 3/h), Konto löschen (Code an die eigene Adresse; löscht Konto, Beiträge mit Bildern, Likes, Folgen, Nachrichten, Sitzungen) |
+| Aufräumen | stündlich: abgelaufene Codes, Sitzungen > 30 Tage inaktiv |
+| Migration | beim Start, idempotent (`sessions`, `terms_accepted_at`, `attempts`, `purpose`) |
+
+Endpunkte: `GET /api/auth/session`, `POST /api/auth/logout`, `GET/DELETE /api/account/sessions[/:id]`,
+`POST /api/account/sessions/end-others`, `GET /api/account/export`, `POST /api/account/delete/request-code`,
+`DELETE /api/account`. Lokal über http: `COOKIE_SECURE=false` setzen.
+
+Prod: Images `nexus-backend`/`nexus-frontend` aus diesem Repo, gestartet über `~/compose/nexus_backend|frontend`
+(nie `docker compose` hier im Repo – gleiche Containernamen wie Prod!).
+
 ## Services
 
 | Service    | Image                   | Port  | Zweck                           |
